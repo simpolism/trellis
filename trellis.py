@@ -74,6 +74,10 @@ class TrellisConfig:
     
     # Paths
     save_dir: str = "./trellis_states"
+
+    # Default dataset
+    default_dataset: str = "cosmicoptima/introspection-prompts"
+    default_split: str = "train"
     
     def save(self, path: str):
         with open(path, "w") as f:
@@ -305,10 +309,10 @@ class Journal:
     
     def log_generation(self, prompt: str, options: list[str]):
         """Log a generation event."""
-        self._append(f"⚡ **Generated options for:**\n> {prompt[:200]}{'...' if len(prompt) > 200 else ''}\n")
+        self._append(f"⚡ **Generated options for:**\n> {prompt}\n")
     
     def log_train(
-        self, 
+        self,
         step: int,
         node_name: str,
         prompt: str,
@@ -320,14 +324,14 @@ class Journal:
         """Log a training step."""
         entry = f"""### Step {step} → `{node_name}`
 **Prompt:**
-> {prompt[:300]}{'...' if len(prompt) > 300 else ''}
+> {prompt}
 
 **Choice:** {choice} | **Drift:** {drift:.3f} | **Loss:** {metrics.get('total_loss', 0):.4f}
 
 <details>
 <summary>Selected response</summary>
 
-{chosen_text[:500]}{'...' if len(chosen_text) > 500 else ''}
+{chosen_text}
 
 </details>
 
@@ -354,7 +358,7 @@ class Journal:
         """Log a reject-all training step."""
         entry = f"""### Step {step} → `{node_name}` *(reject all)*
 **Prompt:**
-> {prompt[:300]}{'...' if len(prompt) > 300 else ''}
+> {prompt}
 
 **Choice:** Reject All (pushed down all options) | **Drift:** {drift:.3f}
 
@@ -725,14 +729,15 @@ class TrellisEngine:
     def generate_options(self, prompt: str) -> list[str]:
         """Generate GROUP_SIZE continuations for the given prompt."""
         if self.dry_run:
-            return [f"[Dry-run response {i+1} to: {prompt[:50]}...]" 
+            print(f"  [dry-run] Generating {self.config.group_size} options...")
+            return [f"[Dry-run response {i+1} to: {prompt[:50]}...]"
                     for i in range(self.config.group_size)]
-        
+
         if self.model is None:
             raise RuntimeError("Model not loaded")
-        
+
         self.model.eval()
-        
+
         messages = [{"role": "user", "content": prompt}]
         inputs = self.tokenizer.apply_chat_template(
             messages,
@@ -740,9 +745,11 @@ class TrellisEngine:
             add_generation_prompt=True,
             return_tensors="pt",
         ).to(self.device)
-        
+
         prompt_len = inputs.shape[1]
-        
+
+        print(f"  ⚡ Generating {self.config.group_size} options ({prompt_len} prompt tokens, max {self.config.max_new_tokens} new)...")
+
         with torch.no_grad():
             sequences = self.model.generate(
                 inputs,
@@ -753,57 +760,69 @@ class TrellisEngine:
                 do_sample=True,
                 pad_token_id=self.tokenizer.pad_token_id,
             )
-        
+
         # Store for training
         self.current_batch = {
             "prompt": prompt,
             "prompt_len": prompt_len,
             "sequences": sequences,
         }
-        
+
         # Decode continuations
         continuations = sequences[:, prompt_len:]
         decoded = self.tokenizer.batch_decode(continuations, skip_special_tokens=True)
+
+        total_new_tokens = continuations.numel()
+        print(f"  ✓ Generated {total_new_tokens} tokens total across {self.config.group_size} options")
+
         return (decoded + [""] * self.config.group_size)[:self.config.group_size]
     
     def train_step(self, choice_idx: int) -> tuple[str, dict]:
         """
         Perform one preference update.
-        
+
         Args:
             choice_idx: 0..GROUP_SIZE-1 for chosen, GROUP_SIZE for reject-all
-        
+
         Returns:
             (status_message, metrics_dict)
         """
+        choice_label = f"Option {chr(65 + choice_idx)}" if choice_idx < self.config.group_size else "Reject All"
+        print(f"  💪 Training on choice: {choice_label}")
+
         if self.dry_run:
+            print(f"  [dry-run] Would update weights here")
             return "🧪 Dry-run: would train here", {"pg_loss": 0.0, "kl_loss": 0.0}
-        
+
         if self.model is None or self.optimizer is None:
             raise RuntimeError("Model not loaded")
         if self.current_batch is None:
             raise RuntimeError("No generations to train on")
-        
+
         prompt_len = self.current_batch["prompt_len"]
         input_ids = self.current_batch["sequences"].to(self.device)
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
-        
+
         advantages = self._compute_advantages(choice_idx)
-        
+        print(f"     Advantages: {advantages.tolist()}")
+
         self.model.train()
         self.optimizer.zero_grad(set_to_none=True)
-        
+
         # Policy logprobs
+        print(f"     Computing policy log-probs...")
         seq_logp, token_logp, token_mask = self._masked_seq_logp(
             self.model, input_ids, attention_mask, prompt_len
         )
-        
+        print(f"     Seq log-probs: {[f'{x:.2f}' for x in seq_logp.tolist()]}")
+
         # Policy gradient loss
         pg_loss = -(advantages * seq_logp).mean()
-        
+
         # Optional KL anchor
         kl_loss = torch.tensor(0.0, device=self.device)
         if self.config.kl_beta > 0.0 and hasattr(self.model, "disable_adapter"):
+            print(f"     Computing KL anchor (β={self.config.kl_beta})...")
             with torch.no_grad():
                 with self.model.disable_adapter():
                     _, token_logp_ref, _ = self._masked_seq_logp(
@@ -812,24 +831,27 @@ class TrellisEngine:
             denom = token_mask.sum().clamp(min=1)
             kl_est = (token_logp - token_logp_ref).sum() / denom
             kl_loss = kl_est ** 2
-        
+
         loss = pg_loss + self.config.kl_beta * kl_loss
+        print(f"     Backward pass...")
         loss.backward()
         self.optimizer.step()
-        
+
         self.model.eval()
-        
+
         metrics = {
             "pg_loss": pg_loss.item(),
             "kl_loss": kl_loss.item(),
             "total_loss": loss.item(),
         }
-        
+
         msg = f"PG: {metrics['pg_loss']:.4f}"
         if self.config.kl_beta > 0:
             msg += f" | KL×β: {self.config.kl_beta * metrics['kl_loss']:.4f}"
         msg += f" | Total: {metrics['total_loss']:.4f}"
-        
+
+        print(f"  ✓ {msg}")
+
         return msg, metrics
     
     def _compute_advantages(self, choice_idx: int) -> torch.Tensor:
@@ -1206,6 +1228,201 @@ class TrellisApp:
         prompt = self.prompt_source.peek()
         return prompt or "", self.prompt_source.status()
 
+    def select_and_advance(self, choice: str):
+        """
+        Generator: train on choice, advance to next prompt, generate new options.
+
+        Yields twice:
+            1. (placeholder options, prompt, status, tree, drift) - prompt visible immediately
+            2. (actual options, prompt, status, tree, drift) - after generation completes
+        """
+        print(f"\n{'='*60}")
+        print(f"STEP {self.step_count + 1}: Selected {choice}")
+        print(f"{'='*60}")
+
+        # Train on the current choice
+        train_status, tree_display, drift_display = self.train(choice)
+
+        # Get next prompt
+        prompt = self.prompt_source.next()
+        if prompt is None:
+            final = (
+                "*(no more prompts)*",
+                "*(no more prompts)*",
+                "*(no more prompts)*",
+                "*(no more prompts)*",
+                "**No more prompts in dataset**",
+                train_status + " | Dataset exhausted",
+                tree_display,
+                drift_display,
+            )
+            yield final
+            yield final
+            return
+
+        prompt_display = f"**Prompt:**\n\n{prompt}"
+        print(f"\nNext prompt ({self.prompt_source.status()}):")
+        print(f"  {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+
+        # First yield: show prompt immediately with placeholder options
+        yield (
+            "*(generating...)*",
+            "*(generating...)*",
+            "*(generating...)*",
+            "*(generating...)*",
+            prompt_display,
+            f"{train_status} | Generating...",
+            tree_display,
+            drift_display,
+        )
+
+        # Generate new options
+        opt_a, opt_b, opt_c, opt_d, gen_status = self.generate(prompt)
+
+        # Clean option text (remove the "**Option X:**\n\n" prefix)
+        def clean_opt(text: str) -> str:
+            if text.startswith("**Option"):
+                parts = text.split("\n\n", 1)
+                return parts[1] if len(parts) > 1 else text
+            return text
+
+        # Second yield: actual options
+        yield (
+            clean_opt(opt_a),
+            clean_opt(opt_b),
+            clean_opt(opt_c),
+            clean_opt(opt_d),
+            prompt_display,
+            train_status,
+            tree_display,
+            drift_display,
+        )
+
+    def skip_and_generate(self):
+        """
+        Generator: Skip current prompt and generate options for the next one.
+
+        Yields twice:
+            1. (placeholder options, prompt, status) - prompt visible immediately
+            2. (actual options, prompt, status) - after generation completes
+        """
+        # Get next prompt (skipping current)
+        prompt = self.prompt_source.next()
+
+        if prompt is None:
+            final = (
+                "*(no more prompts)*",
+                "*(no more prompts)*",
+                "*(no more prompts)*",
+                "*(no more prompts)*",
+                "**No more prompts in dataset**",
+                "Dataset exhausted",
+            )
+            yield final
+            yield final
+            return
+
+        prompt_display = f"**Prompt:**\n\n{prompt}"
+        print(f"\nSkipped to next prompt ({self.prompt_source.status()}):")
+        print(f"  {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+
+        # First yield: show prompt immediately
+        yield (
+            "*(generating...)*",
+            "*(generating...)*",
+            "*(generating...)*",
+            "*(generating...)*",
+            prompt_display,
+            "Generating...",
+        )
+
+        opt_a, opt_b, opt_c, opt_d, gen_status = self.generate(prompt)
+
+        # Clean option text
+        def clean_opt(text: str) -> str:
+            if text.startswith("**Option"):
+                parts = text.split("\n\n", 1)
+                return parts[1] if len(parts) > 1 else text
+            return text
+
+        # Second yield: actual options
+        yield (
+            clean_opt(opt_a),
+            clean_opt(opt_b),
+            clean_opt(opt_c),
+            clean_opt(opt_d),
+            prompt_display,
+            f"Skipped. {gen_status}",
+        )
+
+    def auto_start(self):
+        """
+        Generator: Auto-load default dataset and generate first set of options.
+        Called after model loads.
+
+        Yields twice:
+            1. (placeholder options, prompt, dataset_status) - prompt visible immediately
+            2. (actual options, prompt, dataset_status) - after generation completes
+        """
+        # Load default dataset if not already loaded
+        if not self.prompt_source.is_loaded():
+            print(f"\n📂 Loading default dataset: {self.config.default_dataset}")
+            load_status = self.prompt_source.load(
+                dataset_id=self.config.default_dataset,
+                split=self.config.default_split,
+                shuffle=True,
+            )
+            print(f"  {load_status}")
+
+        # Get first prompt
+        prompt = self.prompt_source.next()
+        if prompt is None:
+            final = (
+                "*(load a dataset)*",
+                "*(load a dataset)*",
+                "*(load a dataset)*",
+                "*(load a dataset)*",
+                "**No dataset loaded**",
+                "No dataset loaded",
+            )
+            yield final
+            yield final
+            return
+
+        prompt_display = f"**Prompt:**\n\n{prompt}"
+        print(f"\nFirst prompt ({self.prompt_source.status()}):")
+        print(f"  {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+
+        # First yield: show prompt immediately
+        yield (
+            "*(generating...)*",
+            "*(generating...)*",
+            "*(generating...)*",
+            "*(generating...)*",
+            prompt_display,
+            self.prompt_source.status(),
+        )
+
+        # Generate options
+        opt_a, opt_b, opt_c, opt_d, gen_status = self.generate(prompt)
+
+        # Clean option text
+        def clean_opt(text: str) -> str:
+            if text.startswith("**Option"):
+                parts = text.split("\n\n", 1)
+                return parts[1] if len(parts) > 1 else text
+            return text
+
+        # Second yield: actual options
+        yield (
+            clean_opt(opt_a),
+            clean_opt(opt_b),
+            clean_opt(opt_c),
+            clean_opt(opt_d),
+            prompt_display,
+            self.prompt_source.status(),
+        )
+
 
 # =============================================================================
 # GRADIO UI
@@ -1216,7 +1433,27 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
     
     config = app.config
     
-    with gr.Blocks(theme=gr.themes.Soft(), title="Trellis") as demo:
+    # Custom CSS for option cards - readable text, not bold
+    custom_css = """
+    .option-card {
+        font-weight: normal !important;
+        text-align: left !important;
+        white-space: pre-wrap !important;
+        min-height: 100px;
+        padding: 12px !important;
+    }
+    .option-card span {
+        font-weight: normal !important;
+    }
+    .prompt-card {
+        background: var(--block-background-fill);
+        padding: 16px;
+        border-radius: 8px;
+        border: 1px solid var(--block-border-color);
+    }
+    """
+
+    with gr.Blocks(theme=gr.themes.Soft(), title="Trellis", css=custom_css) as demo:
         gr.Markdown("# 🌿 Trellis")
         gr.Markdown(
             "Interactive preference steering with branching state.\n\n"
@@ -1240,40 +1477,54 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         with gr.Tabs():
             # === MAIN TAB ===
             with gr.Tab("Steer"):
+                # Header row with dataset status and skip button
                 with gr.Row():
-                    prompt_input = gr.Textbox(
-                        label="Prompt",
-                        lines=3,
-                        placeholder="Ask something to shape the model's disposition...",
-                        scale=4,
+                    dataset_status = gr.Textbox(
+                        label="Dataset",
+                        value="No dataset loaded",
+                        interactive=False,
+                        scale=3,
                     )
-                    with gr.Column(scale=1):
-                        dataset_status = gr.Textbox(
-                            label="Dataset", 
-                            value="No dataset loaded",
-                            interactive=False,
-                        )
-                        next_prompt_btn = gr.Button("📋 Next Prompt")
-                        skip_prompt_btn = gr.Button("⏭️ Skip", size="sm")
-                
-                with gr.Row():
-                    generate_btn = gr.Button("⚡ Generate Options")
-                    retaste_btn = gr.Button("🔄 Re-taste (same prompt)")
-                
-                with gr.Row():
-                    opt_a = gr.Markdown("**Option A:** *(generate first)*")
-                    opt_b = gr.Markdown("**Option B:** *(generate first)*")
-                
-                with gr.Row():
-                    opt_c = gr.Markdown("**Option C:** *(generate first)*")
-                    opt_d = gr.Markdown("**Option D:** *(generate first)*")
-                
-                choice_radio = gr.Radio(
-                    choices=["Option A", "Option B", "Option C", "Option D", "Reject All"],
-                    label="Which has the right vibe?",
+                    skip_btn = gr.Button("⏭️ Skip", scale=1, size="sm")
+
+                # Prompt display
+                prompt_display = gr.Markdown(
+                    "**Prompt:**\n\n*Load model to begin...*",
+                    elem_classes=["prompt-card"],
                 )
-                
-                train_btn = gr.Button("💪 Train (Update Weights)", variant="primary")
+
+                # Option cards (clickable buttons with full text)
+                gr.Markdown("### Click to select and train:")
+
+                with gr.Row():
+                    opt_a = gr.Button(
+                        "A: *(loading...)*",
+                        elem_classes=["option-card"],
+                        variant="secondary",
+                    )
+                    opt_b = gr.Button(
+                        "B: *(loading...)*",
+                        elem_classes=["option-card"],
+                        variant="secondary",
+                    )
+
+                with gr.Row():
+                    opt_c = gr.Button(
+                        "C: *(loading...)*",
+                        elem_classes=["option-card"],
+                        variant="secondary",
+                    )
+                    opt_d = gr.Button(
+                        "D: *(loading...)*",
+                        elem_classes=["option-card"],
+                        variant="secondary",
+                    )
+
+                with gr.Row():
+                    none_btn = gr.Button(
+                        "None of these",
+                        variant="stop",
+                    )
             
             # === DATASET TAB ===
             with gr.Tab("Dataset"):
@@ -1319,6 +1570,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 gr.Markdown(
                     "| Dataset | Subset | Good for |\n"
                     "|---------|--------|----------|\n"
+                    "| `cosmicoptima/introspection-prompts` | — | **Default** - self-reflection, identity |\n"
                     "| `Anthropic/model-written-evals` | `persona` | Self-concept, identity |\n"
                     "| `Anthropic/model-written-evals` | `sycophancy` | Deference vs. honesty |\n"
                     "| `Anthropic/model-written-evals` | `advanced-ai-risk` | Self-preservation |\n"
@@ -1405,79 +1657,108 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                             export_btn = gr.Button("📝 Export to File")
         
         # === WIRING ===
-        
+
         def on_load():
+            """Generator: Load model, then auto-start with default dataset."""
             status, tree = app.initialize()
             choices = app.get_node_choices()
-            return (
-                status, 
-                tree, 
-                gr.update(choices=choices),
-                gr.update(choices=choices),
-                gr.update(choices=choices),
-            )
-        
+
+            # Auto-start: load dataset and generate first options (generator)
+            for a, b, c, d, prompt_md, ds_status in app.auto_start():
+                yield (
+                    status,
+                    tree,
+                    gr.update(choices=choices),
+                    gr.update(choices=choices),
+                    gr.update(choices=choices),
+                    gr.update(value=f"A: {a}"),
+                    gr.update(value=f"B: {b}"),
+                    gr.update(value=f"C: {c}"),
+                    gr.update(value=f"D: {d}"),
+                    prompt_md,
+                    ds_status,
+                )
+
         load_btn.click(
             on_load,
-            outputs=[status_box, tree_display, node_dropdown, compare_node_a, compare_node_b],
+            outputs=[
+                status_box, tree_display, node_dropdown, compare_node_a, compare_node_b,
+                opt_a, opt_b, opt_c, opt_d, prompt_display, dataset_status
+            ],
         )
-        
-        generate_btn.click(
-            app.generate,
-            inputs=[prompt_input],
-            outputs=[opt_a, opt_b, opt_c, opt_d, status_box],
+
+        # Option button handlers - each trains and advances (generators for streaming)
+        def on_select_option(choice: str):
+            """Generator: Handle clicking an option: train, advance, generate new options."""
+            for a, b, c, d, prompt_md, status, tree, drift in app.select_and_advance(choice):
+                choices = app.get_node_choices()
+                yield (
+                    gr.update(value=f"A: {a}"),
+                    gr.update(value=f"B: {b}"),
+                    gr.update(value=f"C: {c}"),
+                    gr.update(value=f"D: {d}"),
+                    prompt_md,
+                    status,
+                    tree,
+                    drift,
+                    gr.update(choices=choices),
+                    gr.update(choices=choices),
+                    gr.update(choices=choices),
+                )
+
+        option_outputs = [
+            opt_a, opt_b, opt_c, opt_d, prompt_display,
+            status_box, tree_display, drift_box,
+            node_dropdown, compare_node_a, compare_node_b
+        ]
+
+        def select_a():
+            yield from on_select_option("Option A")
+
+        def select_b():
+            yield from on_select_option("Option B")
+
+        def select_c():
+            yield from on_select_option("Option C")
+
+        def select_d():
+            yield from on_select_option("Option D")
+
+        def select_none():
+            yield from on_select_option("Reject All")
+
+        opt_a.click(select_a, outputs=option_outputs)
+        opt_b.click(select_b, outputs=option_outputs)
+        opt_c.click(select_c, outputs=option_outputs)
+        opt_d.click(select_d, outputs=option_outputs)
+        none_btn.click(select_none, outputs=option_outputs)
+
+        # Skip button - skip current prompt and regenerate (generator)
+        def on_skip():
+            for a, b, c, d, prompt_md, status in app.skip_and_generate():
+                yield (
+                    gr.update(value=f"A: {a}"),
+                    gr.update(value=f"B: {b}"),
+                    gr.update(value=f"C: {c}"),
+                    gr.update(value=f"D: {d}"),
+                    prompt_md,
+                    status,
+                )
+
+        skip_btn.click(
+            on_skip,
+            outputs=[opt_a, opt_b, opt_c, opt_d, prompt_display, status_box],
         )
-        
-        retaste_btn.click(
-            app.retaste,
-            outputs=[opt_a, opt_b, opt_c, opt_d, status_box],
-        )
-        
+
         # Dataset wiring
         def on_load_dataset(ds_id, subset, split, column, max_prompts, shuffle):
             status, ds_status = app.load_dataset(ds_id, subset, split, column, shuffle, max_prompts)
             return status, ds_status
-        
+
         ds_load_btn.click(
             on_load_dataset,
             inputs=[ds_id_input, ds_subset_input, ds_split_input, ds_column_input, ds_max_input, ds_shuffle],
             outputs=[status_box, dataset_status],
-        )
-        
-        def on_next_prompt():
-            prompt, ds_status = app.next_prompt()
-            return prompt, ds_status
-        
-        next_prompt_btn.click(
-            on_next_prompt,
-            outputs=[prompt_input, dataset_status],
-        )
-        
-        def on_skip_prompt():
-            prompt, ds_status = app.skip_prompt()
-            return prompt, ds_status
-        
-        skip_prompt_btn.click(
-            on_skip_prompt,
-            outputs=[prompt_input, dataset_status],
-        )
-        
-        def on_train(choice):
-            status, tree, drift = app.train(choice)
-            choices = app.get_node_choices()
-            return (
-                status, 
-                tree, 
-                drift,
-                gr.update(choices=choices),
-                gr.update(choices=choices),
-                gr.update(choices=choices),
-            )
-        
-        train_btn.click(
-            on_train,
-            inputs=[choice_radio],
-            outputs=[status_box, tree_display, drift_box, node_dropdown, compare_node_a, compare_node_b],
         )
         
         branch_btn.click(
