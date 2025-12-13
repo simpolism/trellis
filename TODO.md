@@ -1,0 +1,7 @@
+- Update README datasets in particular + tab descriptions
+- Model tab for loading + hyperparams / LoRA config
+- Easy 1-click undo on steer tab
+- Tree tab doesn't work at all -- not persisting more than 2 nodes, step vs hash is unclear... need to rethink that entirely.
+- Maybe remove branching and just do linear for now?
+- Save adapter every step too in case u get cut off?
+- Refactor into files...
