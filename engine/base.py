@@ -1,0 +1,185 @@
+"""
+Base Engine
+===========
+
+Abstract base class for training engines, allowing future extension to
+different backends (different LoRA implementations, different optimizers, etc.)
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from config import TrellisConfig
+    from state.checkpoint import Checkpoint
+
+
+@dataclass
+class VRAMEstimate:
+    """VRAM breakdown for display to user."""
+
+    base_model_gb: float
+    lora_params_gb: float
+    kv_cache_gb: float
+    optimizer_gb: float
+    activations_gb: float
+    total_gb: float
+    fits_in_vram: bool
+    available_vram_gb: float
+
+    def to_display_string(self) -> str:
+        """Format for UI display."""
+        status = "OK" if self.fits_in_vram else "WARNING: May not fit!"
+        lines = [
+            f"**VRAM Estimate:** {self.total_gb:.1f} GB",
+            f"- Base model (4-bit): {self.base_model_gb:.1f} GB",
+            f"- LoRA parameters: {self.lora_params_gb:.2f} GB",
+            f"- KV cache: {self.kv_cache_gb:.2f} GB",
+            f"- Optimizer states: {self.optimizer_gb:.2f} GB",
+            f"- Activations: {self.activations_gb:.2f} GB",
+            "",
+            f"**Available:** {self.available_vram_gb:.1f} GB",
+            f"**Status:** {status}",
+        ]
+        return "\n".join(lines)
+
+
+class BaseEngine(ABC):
+    """
+    Abstract base class for training engines.
+
+    Engines handle:
+    - Model loading and configuration
+    - Generation (sampling)
+    - Training step (policy gradient update)
+    - State management (checkpointing, restoration)
+    """
+
+    @abstractmethod
+    def load_model(self) -> str:
+        """
+        Initialize model, tokenizer, LoRA, optimizer.
+
+        Returns:
+            Status message
+        """
+        ...
+
+    @abstractmethod
+    def generate_options(self, prompt: str) -> list[str]:
+        """
+        Generate GROUP_SIZE continuations for the given prompt.
+
+        Args:
+            prompt: The input prompt
+
+        Returns:
+            List of generated continuations
+        """
+        ...
+
+    @abstractmethod
+    def train_step(self, choice_idx: int) -> tuple[str, dict]:
+        """
+        Perform one preference update.
+
+        Args:
+            choice_idx: 0..GROUP_SIZE-1 for chosen, GROUP_SIZE for reject-all
+
+        Returns:
+            (status_message, metrics_dict)
+        """
+        ...
+
+    @abstractmethod
+    def compute_drift(self) -> float:
+        """
+        L2 distance of LoRA weights from zero (distance from base model).
+
+        Returns:
+            Drift value
+        """
+        ...
+
+    @abstractmethod
+    def get_adapter_state(self) -> dict:
+        """
+        Snapshot adapter weights (CPU-resident).
+
+        Returns:
+            State dictionary
+        """
+        ...
+
+    @abstractmethod
+    def get_optimizer_state(self) -> dict:
+        """
+        Snapshot optimizer state (CPU-resident).
+
+        Returns:
+            State dictionary
+        """
+        ...
+
+    @abstractmethod
+    def restore_state(self, adapter_state: dict, optimizer_state: dict) -> None:
+        """
+        Restore adapter and optimizer from snapshots.
+
+        Args:
+            adapter_state: Adapter weights dictionary
+            optimizer_state: Optimizer state dictionary
+        """
+        ...
+
+    @abstractmethod
+    def save_adapter(self, path: str) -> None:
+        """
+        Save current LoRA adapter to disk in HuggingFace format.
+
+        Args:
+            path: Directory to save adapter
+        """
+        ...
+
+    @abstractmethod
+    def merge_and_save(self, path: str) -> str:
+        """
+        Merge LoRA into base model and save full model.
+
+        Args:
+            path: Directory to save merged model
+
+        Returns:
+            Status message
+        """
+        ...
+
+    @classmethod
+    @abstractmethod
+    def estimate_vram(cls, config: "TrellisConfig") -> VRAMEstimate:
+        """
+        Estimate VRAM requirements before loading.
+
+        Args:
+            config: Training configuration
+
+        Returns:
+            VRAMEstimate with breakdown
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def is_loaded(self) -> bool:
+        """Whether model is loaded and ready."""
+        ...
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Human-readable engine name for dropdown display."""
+        ...

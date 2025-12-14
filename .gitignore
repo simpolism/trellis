@@ -1,4 +1,5 @@
 .venv
 trellis_states/
+trellis_sessions/
 unsloth_compiled_cache/
 __pycache__/
