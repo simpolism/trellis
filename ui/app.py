@@ -31,6 +31,12 @@ from .styles import MOBILE_CSS
 from .screens import build_config_screen, build_training_screen, build_review_screen
 
 
+def _log(message: str):
+    """Print a timestamped log message to stdout."""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] [Trellis] {message}")
+
+
 class TrellisApp:
     """Main controller wiring engine, state, and Gradio UI."""
 
@@ -52,6 +58,9 @@ class TrellisApp:
         self.current_prompt: Optional[str] = None
         self.current_options: list[str] = []
 
+        # Model loading state (separate from training)
+        self.model_loaded: bool = False
+
     # =========================================================================
     # Screen 1: Config Methods
     # =========================================================================
@@ -61,7 +70,6 @@ class TrellisApp:
         sessions = SessionState.discover_sessions(str(self.base_save_dir))
         result = []
         for dir_name, s, path in sessions:
-            # Use custom name if set, otherwise use directory name
             display_name = s.name if s.name else dir_name
             date_str = s.last_modified[:10] if s.last_modified else "unknown"
             result.append((f"{display_name} ({date_str})", path))
@@ -75,6 +83,7 @@ class TrellisApp:
         column: str,
     ) -> tuple[str, str, str, str]:
         """Load dataset and return preview questions."""
+        _log(f"Loading dataset: {dataset_id}")
         status = self.prompt_source.load(
             dataset_id=dataset_id,
             subset=subset if subset else None,
@@ -82,6 +91,7 @@ class TrellisApp:
             text_column=column if column else None,
             shuffle=True,
         )
+        _log(f"Dataset loaded: {self.prompt_source.total()} prompts")
 
         preview = self.prompt_source.preview(3)
         q1 = preview[0] if len(preview) > 0 else ""
@@ -107,35 +117,73 @@ class TrellisApp:
         estimate = estimate_vram_unsloth(temp_config)
         return estimate.to_display_string()
 
-    def start_training(
+    def load_model_only(
         self,
-        # Model
         model_name: str,
         context_length: int,
         group_size: int,
-        # Engine (currently ignored, only one engine)
-        engine_name: str,
-        # Hyperparams
         learning_rate: float,
         kl_beta: float,
         temperature: float,
         max_new_tokens: int,
-        # LoRA
         lora_rank: int,
         lora_alpha: int,
         max_undos: Optional[float],
-        # Prompts
         system_prompt: str,
         prompt_prefix: str,
         prompt_suffix: str,
-        # Dataset (already loaded via preview)
         dataset_id: str,
     ):
-        """
-        Initialize training session.
+        """Load model without starting training session. Yields status updates."""
+        _log(f"Loading model: {model_name}")
+        yield "Loading model (this may take a minute)..."
 
-        Yields status updates for streaming UI.
-        """
+        # Build config
+        self.config = TrellisConfig(
+            model_name=model_name,
+            max_seq_length=int(context_length),
+            group_size=int(group_size),
+            learning_rate=learning_rate,
+            kl_beta=kl_beta,
+            temperature=temperature,
+            max_new_tokens=int(max_new_tokens),
+            lora_rank=int(lora_rank),
+            lora_alpha=int(lora_alpha),
+            max_undos=int(max_undos) if max_undos else None,
+            default_dataset=dataset_id,
+            system_prompt=system_prompt if system_prompt else None,
+            prompt_prefix=prompt_prefix,
+            prompt_suffix=prompt_suffix,
+        )
+
+        # Initialize engine
+        self.engine = UnslothEngine(self.config)
+        status = self.engine.load_model()
+        self.model_loaded = True
+
+        _log(f"Model loaded successfully")
+        yield f"✅ Model loaded: {model_name}"
+
+    def start_training(
+        self,
+        model_name: str,
+        context_length: int,
+        group_size: int,
+        engine_name: str,
+        learning_rate: float,
+        kl_beta: float,
+        temperature: float,
+        max_new_tokens: int,
+        lora_rank: int,
+        lora_alpha: int,
+        max_undos: Optional[float],
+        system_prompt: str,
+        prompt_prefix: str,
+        prompt_suffix: str,
+        dataset_id: str,
+    ):
+        """Initialize training session. Yields status updates."""
+        _log("Initializing training session...")
         yield "Initializing session..."
 
         # Create session directory
@@ -143,7 +191,7 @@ class TrellisApp:
         self.session_dir = self.base_save_dir / session_name
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build config
+        # Build/update config with save_dir
         self.config = TrellisConfig(
             model_name=model_name,
             max_seq_length=int(context_length),
@@ -177,14 +225,17 @@ class TrellisApp:
             max_undos=self.config.max_undos,
         )
 
-        yield "Loading model (this may take a minute)..."
-
-        # Initialize engine
-        self.engine = UnslothEngine(self.config)
-        status = self.engine.load_model()
+        # Load model if not already loaded
+        if not self.model_loaded or self.engine is None:
+            _log(f"Loading model: {model_name}")
+            yield "Loading model (this may take a minute)..."
+            self.engine = UnslothEngine(self.config)
+            self.engine.load_model()
+            self.model_loaded = True
 
         self.journal.log_init(self.config.model_name)
 
+        _log("Creating initial checkpoint...")
         yield "Creating initial checkpoint..."
 
         # Create root checkpoint
@@ -197,14 +248,15 @@ class TrellisApp:
         self.undo_stack.push(root)
 
         self.step_count = 0
-        print(f"[Trellis] Session started")
-        print(f"[Trellis] Model: {self.config.model_name}")
-        print(f"[Trellis] Dataset: {self.prompt_source.dataset_id} ({self.prompt_source.total()} prompts)")
+        _log("Session initialized")
+        _log(f"Model: {self.config.model_name}")
+        _log(f"Dataset: {self.prompt_source.dataset_id} ({self.prompt_source.total()} prompts)")
 
         yield "Ready!"
 
     def resume_session(self, session_path: str):
-        """Resume an existing session."""
+        """Resume an existing session. Yields status updates."""
+        _log(f"Resuming session: {session_path}")
         yield "Loading session..."
 
         self.session_dir = Path(session_path)
@@ -212,17 +264,21 @@ class TrellisApp:
         # Load session state and config
         self.session_state, self.config = load_session(session_path)
 
+        _log("Restoring undo stack...")
         yield "Restoring undo stack..."
 
         # Load undo stack
         self.undo_stack = LinearUndoStack.load(self.session_dir)
 
+        _log(f"Loading model: {self.config.model_name}")
         yield "Loading model..."
 
         # Initialize engine
         self.engine = UnslothEngine(self.config)
         self.engine.load_model()
+        self.model_loaded = True
 
+        _log("Restoring checkpoint...")
         yield "Restoring checkpoint..."
 
         # Restore to current checkpoint
@@ -245,7 +301,7 @@ class TrellisApp:
 
         self.step_count = current.step_count if current else 0
 
-        print(f"[Trellis] Resumed session at step {self.step_count}")
+        _log(f"Session resumed at step {self.step_count}")
 
         yield "Session restored!"
 
@@ -263,12 +319,12 @@ class TrellisApp:
         if not self.current_prompt:
             return "No prompts available. Load a dataset first.", []
 
-        print(f"[Trellis] Generating options for: {self.current_prompt[:80]}...")
+        _log(f"Generating options for prompt: {self.current_prompt[:60]}...")
 
         # Generate options
         self.current_options = self.engine.generate_options(self.current_prompt)
 
-        print(f"[Trellis] Generated {len(self.current_options)} options")
+        _log(f"Generated {len(self.current_options)} options")
 
         if self.journal:
             self.journal.log_generation(self.current_prompt, len(self.current_options))
@@ -283,7 +339,7 @@ class TrellisApp:
         choice_label = f"Option {chr(65 + choice_idx)}" if choice_idx < len(self.current_options) else "Reject All"
         chosen_response = self.current_options[choice_idx] if choice_idx < len(self.current_options) else ""
 
-        print(f"[Trellis] Training on {choice_label}...")
+        _log(f"Training on {choice_label}...")
 
         # Train
         status, metrics = self.engine.train_step(choice_idx)
@@ -291,7 +347,7 @@ class TrellisApp:
 
         self.step_count += 1
 
-        print(f"[Trellis] Step {self.step_count}: {status} | drift={drift:.3f}")
+        _log(f"Step {self.step_count}: {status} | drift={drift:.3f}")
 
         # Log to journal (detailed format)
         if self.journal:
@@ -342,7 +398,7 @@ class TrellisApp:
         if self.journal and self.current_prompt:
             self.journal.log_skip(self.step_count, self.current_prompt)
 
-        print(f"[Trellis] Skipped prompt")
+        _log("Skipped prompt")
 
         return "Skipped"
 
@@ -366,7 +422,7 @@ class TrellisApp:
             if self.journal:
                 self.journal.log_undo(old_step, self.step_count)
 
-            print(f"[Trellis] Undo: step {old_step} -> {self.step_count}")
+            _log(f"Undo: step {old_step} -> {self.step_count}")
 
             return checkpoint, f"Undone to step {self.step_count}"
 
@@ -376,11 +432,11 @@ class TrellisApp:
         """Apply an edited prompt and regenerate."""
         self.current_prompt = new_prompt
 
-        print(f"[Trellis] Regenerating with edited prompt...")
+        _log("Regenerating with edited prompt...")
 
         self.current_options = self.engine.generate_options(new_prompt)
 
-        print(f"[Trellis] Generated {len(self.current_options)} options")
+        _log(f"Generated {len(self.current_options)} options")
 
         return new_prompt, self.current_options
 
@@ -398,7 +454,7 @@ class TrellisApp:
         if self.journal:
             self.journal.log_session_save(str(self.session_dir))
 
-        print(f"[Trellis] Session saved: {name or self.session_dir.name}")
+        _log(f"Session saved: {name or self.session_dir.name}")
 
         return f"Session saved as '{name or self.session_dir.name}'"
 
@@ -434,6 +490,8 @@ class TrellisApp:
         path = self.session_dir / name if self.session_dir else Path(name)
         self.engine.save_adapter(str(path))
 
+        _log(f"LoRA checkpoint saved to {path}")
+
         return f"LoRA checkpoint saved to {path}"
 
     def merge_lora(self, output_path: str) -> str:
@@ -441,7 +499,28 @@ class TrellisApp:
         if not self.engine:
             return "No model loaded"
 
-        return self.engine.merge_and_save(output_path)
+        _log(f"Merging LoRA to {output_path}...")
+        result = self.engine.merge_and_save(output_path)
+        _log(f"Merge complete: {result}")
+        return result
+
+    def unload_model(self):
+        """Unload the model to free memory."""
+        if self.engine:
+            _log("Unloading model...")
+            # Clear references to allow garbage collection
+            self.engine = None
+            self.model_loaded = False
+
+            # Try to free GPU memory
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except:
+                pass
+
+            _log("Model unloaded")
 
     def get_final_stats(self) -> tuple[str, str]:
         """Get final stats for review screen."""
@@ -450,28 +529,11 @@ class TrellisApp:
         drift_text = f"**Final Drift:** {drift:.3f}"
         return steps_text, drift_text
 
-    # =========================================================================
-    # Utility Methods
-    # =========================================================================
-
-    def _timestamp(self) -> str:
-        """Get current timestamp for logs."""
-        return datetime.now().strftime("%H:%M:%S")
-
-
-# JavaScript for scrolling to top of page on tab switch
-SCROLL_TO_TOP_JS = """
-function scrollToTop() {
-    window.scrollTo({top: 0, behavior: 'smooth'});
-    return [];
-}
-"""
-
 
 def build_ui(app: TrellisApp) -> gr.Blocks:
     """Build the complete Gradio UI and wire up events."""
 
-    with gr.Blocks(title="Trellis", css=MOBILE_CSS, js=SCROLL_TO_TOP_JS) as demo:
+    with gr.Blocks(title="Trellis", css=MOBILE_CSS) as demo:
         gr.Markdown("# Trellis")
         gr.Markdown("*Interactive preference steering for language models*")
 
@@ -529,6 +591,44 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             outputs=[config_components["vram_display"]],
         )
 
+        # Load model button (separate from Go)
+        def load_model_flow(
+            model, context, group,
+            lr, kl, temp, tokens,
+            rank, alpha, max_undos,
+            sys_prompt, prefix, suffix,
+            dataset_id,
+        ):
+            for status in app.load_model_only(
+                model, context, group,
+                lr, kl, temp, tokens,
+                rank, alpha, max_undos,
+                sys_prompt, prefix, suffix,
+                dataset_id,
+            ):
+                yield status
+
+        config_components["load_model_btn"].click(
+            load_model_flow,
+            inputs=[
+                config_components["model_input"],
+                config_components["context_slider"],
+                config_components["group_size"],
+                config_components["learning_rate"],
+                config_components["kl_beta"],
+                config_components["temperature"],
+                config_components["max_new_tokens"],
+                config_components["lora_rank"],
+                config_components["lora_alpha"],
+                config_components["max_undos"],
+                config_components["system_prompt"],
+                config_components["prompt_prefix"],
+                config_components["prompt_suffix"],
+                config_components["dataset_input"],
+            ],
+            outputs=[config_components["model_status"]],
+        )
+
         def format_options_for_display(options: list[str]) -> list[str]:
             """Format options as markdown for display (no truncation)."""
             formatted = []
@@ -545,7 +645,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             dataset_id,
         ):
             """Start training with streaming updates, then generate first prompt."""
-            # Yield status updates during loading
+            # Initialize session (this may load model if not already loaded)
             for status in app.start_training(
                 model, context, group, engine,
                 lr, kl, temp, tokens,
@@ -553,31 +653,31 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 sys_prompt, prefix, suffix,
                 dataset_id,
             ):
-                yield (
-                    status,  # go_status
-                    gr.Tabs(selected=0),  # stay on setup tab during loading
-                    gr.skip(), gr.skip(), gr.skip(),  # stats
-                    gr.skip(),  # prompt
-                    gr.skip(), gr.skip(), gr.skip(), gr.skip(),  # options A-D
+                yield (status, gr.skip())  # Don't change tab until ready
+
+            # Now switch to training tab
+            yield ("Switching to training...", gr.Tabs(selected=1))
+
+        def generate_first_prompt():
+            """Generate initial prompt and options for training screen."""
+            if not app.model_loaded:
+                return (
+                    "**Step:** 0", "**Drift:** 0.000", "**Dataset:** Not loaded",
+                    "*Model not loaded*",
+                    "*Option A*", "*Option B*", "*Option C*", "*Option D*",
                 )
 
-            # Generate first prompt
             prompt, options = app.generate_and_display()
             stats = app.get_stats()
-
-            # Format options for display
             opt_texts = format_options_for_display(options)
 
-            # Switch to training tab
-            yield (
-                "Ready!",  # go_status
-                gr.Tabs(selected=1),  # switch to training tab
-                stats[0], stats[1], stats[2],  # stats
-                f"**Prompt:**\n\n{prompt}",  # prompt display
-                opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
-                opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
-                opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
-                opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+            return (
+                stats[0], stats[1], stats[2],
+                f"**Prompt:**\n\n{prompt}",
+                opt_texts[0] if len(opt_texts) > 0 else "*Generating...*",
+                opt_texts[1] if len(opt_texts) > 1 else "*Generating...*",
+                opt_texts[2] if len(opt_texts) > 2 else "*Generating...*",
+                opt_texts[3] if len(opt_texts) > 3 else "*Generating...*",
             )
 
         config_components["go_btn"].click(
@@ -602,6 +702,11 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             outputs=[
                 config_components["go_status"],
                 tabs,
+            ],
+        ).then(
+            # After tab switch, generate first prompt
+            generate_first_prompt,
+            outputs=[
                 training_components["step_display"],
                 training_components["drift_display"],
                 training_components["dataset_info"],
@@ -617,7 +722,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         def resume_session_flow(session_dropdown):
             """Resume session and go directly to training."""
             if not session_dropdown:
-                yield "Please select a session to resume", gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
+                yield ("Please select a session to resume", gr.skip())
                 return
 
             # Find the session path from the dropdown value
@@ -629,34 +734,15 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                     break
 
             if not session_path:
-                yield "Session not found", gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
+                yield ("Session not found", gr.skip())
                 return
 
             # Resume session
             for status in app.resume_session(session_path):
-                yield (
-                    status,
-                    gr.Tabs(selected=0),
-                    gr.skip(), gr.skip(), gr.skip(),
-                    gr.skip(),
-                    gr.skip(), gr.skip(), gr.skip(), gr.skip(),
-                )
+                yield (status, gr.skip())
 
-            # Generate first prompt
-            prompt, options = app.generate_and_display()
-            stats = app.get_stats()
-            opt_texts = format_options_for_display(options)
-
-            yield (
-                "Resumed!",
-                gr.Tabs(selected=1),
-                stats[0], stats[1], stats[2],
-                f"**Prompt:**\n\n{prompt}",
-                opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
-                opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
-                opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
-                opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
-            )
+            # Switch to training tab
+            yield ("Resumed!", gr.Tabs(selected=1))
 
         config_components["resume_btn"].click(
             resume_session_flow,
@@ -664,6 +750,11 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             outputs=[
                 config_components["resume_status"],
                 tabs,
+            ],
+        ).then(
+            # After tab switch, generate first prompt
+            generate_first_prompt,
+            outputs=[
                 training_components["step_display"],
                 training_components["drift_display"],
                 training_components["dataset_info"],
@@ -679,12 +770,8 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         # Screen 2 Event Handlers
         # =====================================================================
 
-        # Common outputs for option/action buttons
-        training_outputs = [
-            training_components["prompt_display"],
-            training_components["step_display"],
-            training_components["drift_display"],
-            training_components["dataset_info"],
+        # Option outputs only - stats/prompt stay visible
+        option_outputs = [
             training_components["opt_a_text"],
             training_components["opt_b_text"],
             training_components["opt_c_text"],
@@ -692,15 +779,28 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             training_components["undo_status"],
         ]
 
-        def generate_next_with_loading():
-            """Generate next prompt and options."""
+        # Full outputs including stats
+        full_outputs = [
+            training_components["step_display"],
+            training_components["drift_display"],
+            training_components["dataset_info"],
+            training_components["prompt_display"],
+            training_components["opt_a_text"],
+            training_components["opt_b_text"],
+            training_components["opt_c_text"],
+            training_components["opt_d_text"],
+            training_components["undo_status"],
+        ]
+
+        def generate_next_options_only():
+            """Generate next prompt and options (returns only options for partial update)."""
             prompt, options = app.generate_and_display()
             stats = app.get_stats()
             opt_texts = format_options_for_display(options)
 
             return (
-                f"**Prompt:**\n\n{prompt}",
                 stats[0], stats[1], stats[2],
+                f"**Prompt:**\n\n{prompt}",
                 opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
                 opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
                 opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
@@ -711,43 +811,43 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         def select_and_advance(choice_idx):
             """Select option, train, then generate next."""
             app.select_option(choice_idx)
-            return generate_next_with_loading()
+            return generate_next_options_only()
 
         # Wire option select buttons
         training_components["opt_a_btn"].click(
             lambda: select_and_advance(0),
-            outputs=training_outputs,
+            outputs=full_outputs,
         )
         training_components["opt_b_btn"].click(
             lambda: select_and_advance(1),
-            outputs=training_outputs,
+            outputs=full_outputs,
         )
         training_components["opt_c_btn"].click(
             lambda: select_and_advance(2),
-            outputs=training_outputs,
+            outputs=full_outputs,
         )
         training_components["opt_d_btn"].click(
             lambda: select_and_advance(3),
-            outputs=training_outputs,
+            outputs=full_outputs,
         )
 
         def reject_all():
             """Reject all options and train."""
             app.select_option(app.config.group_size if app.config else 4)
-            return generate_next_with_loading()
+            return generate_next_options_only()
 
         training_components["none_btn"].click(
             reject_all,
-            outputs=training_outputs,
+            outputs=full_outputs,
         )
 
         def skip():
             app.skip_prompt()
-            return generate_next_with_loading()
+            return generate_next_options_only()
 
         training_components["skip_btn"].click(
             skip,
-            outputs=training_outputs,
+            outputs=full_outputs,
         )
 
         def undo():
@@ -760,8 +860,8 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 stats = app.get_stats()
 
                 return (
-                    f"**Prompt:**\n\n{prompt}",
                     stats[0], stats[1], stats[2],
+                    f"**Prompt:**\n\n{prompt}",
                     opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
                     opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
                     opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
@@ -769,48 +869,48 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                     status,
                 )
             else:
+                stats = app.get_stats()
                 return (
+                    stats[0], stats[1], stats[2],
                     gr.skip(),
-                    gr.skip(), gr.skip(), gr.skip(),
                     gr.skip(), gr.skip(), gr.skip(), gr.skip(),
                     status,
                 )
 
         training_components["undo_btn"].click(
             undo,
-            outputs=training_outputs,
+            outputs=full_outputs,
         )
 
         # Inline prompt editing handlers
         def enter_edit_mode():
             """Switch to edit mode."""
             return (
-                gr.Markdown(visible=False),  # hide prompt display
-                gr.Textbox(visible=True, value=app.current_prompt or ""),  # show edit input
-                gr.Row(visible=True),  # show edit buttons
-                gr.Button(visible=False),  # hide edit button
+                gr.Markdown(visible=False),
+                gr.Textbox(visible=True, value=app.current_prompt or ""),
+                gr.Row(visible=True),
+                gr.Button(visible=False),
             )
 
         def cancel_edit_mode():
             """Exit edit mode without changes."""
             return (
-                gr.Markdown(visible=True),  # show prompt display
-                gr.Textbox(visible=False),  # hide edit input
-                gr.Row(visible=False),  # hide edit buttons
-                gr.Button(visible=True),  # show edit button
+                gr.Markdown(visible=True),
+                gr.Textbox(visible=False),
+                gr.Row(visible=False),
+                gr.Button(visible=True),
             )
 
         def apply_edit_and_regenerate(new_prompt):
             """Apply edited prompt and regenerate options."""
             prompt, options = app.apply_edited_prompt(new_prompt)
             opt_texts = format_options_for_display(options)
-            stats = app.get_stats()
 
             return (
-                gr.Markdown(visible=True, value=f"**Prompt:**\n\n{prompt}"),  # show updated prompt
-                gr.Textbox(visible=False),  # hide edit input
-                gr.Row(visible=False),  # hide edit buttons
-                gr.Button(visible=True),  # show edit button
+                gr.Markdown(visible=True, value=f"**Prompt:**\n\n{prompt}"),
+                gr.Textbox(visible=False),
+                gr.Row(visible=False),
+                gr.Button(visible=True),
                 opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
                 opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
                 opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
@@ -864,10 +964,21 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
 
         # Go to review
         def go_to_review():
+            # Get stats and journal synchronously
             stats = app.get_final_stats()
             journal = app.get_journal_content()
             config = app.get_config_display()
-            return gr.Tabs(selected=2), stats[0], stats[1], journal, config
+
+            # Unload model to free memory
+            app.unload_model()
+
+            return (
+                gr.Tabs(selected=2),
+                stats[0],
+                stats[1],
+                journal,
+                config,
+            )
 
         training_components["done_btn"].click(
             go_to_review,

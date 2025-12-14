@@ -117,7 +117,9 @@ def build_training_screen() -> tuple[gr.Tab, dict]:
         gr.Markdown("---")
 
         with gr.Row():
-            done_btn = gr.Button("Done - Review Results", variant="primary", size="lg")
+            sample_btn = gr.Button("Sample", interactive=False)
+            journal_btn = gr.Button("View Journal", interactive=False)
+            done_btn = gr.Button("Done - Review Results", variant="primary")
 
     components = {
         # Header
@@ -163,7 +165,9 @@ def build_training_screen() -> tuple[gr.Tab, dict]:
         "save_session_name": save_session_name,
         "save_session_btn": save_session_btn,
         "save_status": save_status,
-        # Navigation
+        # Bottom (with future feature placeholders)
+        "sample_btn": sample_btn,
+        "journal_btn": journal_btn,
         "done_btn": done_btn,
     }
 

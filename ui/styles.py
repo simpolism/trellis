@@ -11,12 +11,12 @@ MOBILE_CSS = """
     max-width: 100% !important;
 }
 
-/* Option groups - show full text with scrollable content */
+/* Option groups - show full text with minimal padding */
 .option-group {
     border: 1px solid var(--block-border-color);
     border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 12px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
     background: var(--background-fill-secondary);
 }
 
@@ -24,29 +24,38 @@ MOBILE_CSS = """
     border-color: var(--primary-500);
 }
 
-/* Option text - scrollable full content */
+/* Option text - scrollable full content, minimal padding */
 .option-text {
-    max-height: 300px;
+    max-height: 250px;
     overflow-y: auto;
-    padding: 8px 0;
+    padding: 4px 0;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.5;
     white-space: pre-wrap;
     word-wrap: break-word;
 }
 
+/* Remove extra margins from markdown inside options */
+.option-text p {
+    margin: 0 0 4px 0;
+}
+
+.option-text p:last-child {
+    margin-bottom: 0;
+}
+
 /* Select button within option group */
 .select-btn {
-    margin-top: 8px;
+    margin-top: 4px;
 }
 
 /* Prompt display */
 .prompt-card {
     background: var(--block-background-fill);
-    padding: 16px;
+    padding: 12px 16px;
     border-radius: 8px;
     border: 1px solid var(--block-border-color);
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 
 /* Stats header */
@@ -56,18 +65,18 @@ MOBILE_CSS = """
     padding: 8px 12px;
     background: var(--block-background-fill);
     border-radius: 6px;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 
 /* Mobile breakpoint */
 @media (max-width: 768px) {
     .option-group {
-        padding: 10px;
-        margin-bottom: 10px;
+        padding: 8px;
+        margin-bottom: 6px;
     }
 
     .option-text {
-        max-height: 200px;
+        max-height: 180px;
         font-size: 13px;
     }
 

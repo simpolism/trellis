@@ -77,7 +77,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     scale=2,
                     info="Column containing prompts (usually auto-detected)",
                 )
-            load_preview_btn = gr.Button("Load & Preview", variant="secondary")
+            load_preview_btn = gr.Button("Load & Preview Dataset", variant="secondary")
             dataset_status = gr.Markdown("")
 
             gr.Markdown("**Preview:**")
@@ -119,6 +119,13 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     scale=1,
                     info="How many response options to generate each turn",
                 )
+
+            with gr.Row():
+                check_vram_btn = gr.Button("Check VRAM", variant="secondary", scale=1)
+                load_model_btn = gr.Button("Load Model", variant="secondary", scale=1)
+
+            vram_display = gr.Markdown("*Click 'Check VRAM' to estimate memory requirements*")
+            model_status = gr.Markdown("")
 
         gr.Markdown("---")
 
@@ -246,18 +253,6 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
 
         gr.Markdown("---")
 
-        # ========== VRAM Check Section ==========
-        with gr.Group():
-            gr.Markdown("### System Check")
-            gr.Markdown(
-                "*Verify your GPU has enough memory before starting. "
-                "Estimates may be slightly lower than actual usage.*"
-            )
-            check_vram_btn = gr.Button("Check VRAM Requirements", variant="secondary")
-            vram_display = gr.Markdown("*Click to check VRAM requirements*")
-
-        gr.Markdown("---")
-
         # ========== Go Button ==========
         go_btn = gr.Button(
             "Go! Start Training",
@@ -286,6 +281,10 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         "model_input": model_input,
         "context_slider": context_slider,
         "group_size": group_size,
+        "check_vram_btn": check_vram_btn,
+        "load_model_btn": load_model_btn,
+        "vram_display": vram_display,
+        "model_status": model_status,
         # Engine
         "engine_dropdown": engine_dropdown,
         # Training (now in engine section)
@@ -302,9 +301,6 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         "system_prompt": system_prompt,
         "prompt_prefix": prompt_prefix,
         "prompt_suffix": prompt_suffix,
-        # VRAM
-        "check_vram_btn": check_vram_btn,
-        "vram_display": vram_display,
         # Go
         "go_btn": go_btn,
         "go_status": go_status,
