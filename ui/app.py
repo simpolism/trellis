@@ -61,6 +61,13 @@ class TrellisApp:
         # Model loading state (separate from training)
         self.model_loaded: bool = False
 
+    def _create_engine(self, engine_name: str) -> BaseEngine:
+        """Factory for selecting the training backend."""
+        normalized = (engine_name or "").lower()
+        if "unsloth" in normalized:
+            return UnslothEngine(self.config)
+        raise ValueError(f"Unsupported engine: {engine_name}")
+
     # =========================================================================
     # Screen 1: Config Methods
     # =========================================================================
@@ -122,6 +129,7 @@ class TrellisApp:
         model_name: str,
         context_length: int,
         group_size: int,
+        engine_name: str,
         learning_rate: float,
         kl_beta: float,
         temperature: float,
@@ -157,7 +165,7 @@ class TrellisApp:
         )
 
         # Initialize engine
-        self.engine = UnslothEngine(self.config)
+        self.engine = self._create_engine(engine_name)
         status = self.engine.load_model()
         self.model_loaded = True
 
@@ -181,6 +189,9 @@ class TrellisApp:
         prompt_prefix: str,
         prompt_suffix: str,
         dataset_id: str,
+        dataset_subset: str,
+        dataset_split: str,
+        dataset_column: str,
     ):
         """Initialize training session. Yields status updates."""
         _log("Initializing training session...")
@@ -214,7 +225,11 @@ class TrellisApp:
         self.config.save(str(self.session_dir / "config.json"))
 
         # Initialize session state
-        self.session_state = SessionState.create_new(self.session_dir, self.config)
+        self.session_state = SessionState.create_new(
+            self.session_dir,
+            self.config,
+            engine_name=engine_name,
+        )
 
         # Initialize journal
         self.journal = Journal(self.session_dir / "journal")
@@ -225,11 +240,45 @@ class TrellisApp:
             max_undos=self.config.max_undos,
         )
 
+        # Load dataset (ensures prompt source is ready before first generate)
+        dataset_status = self.prompt_source.load(
+            dataset_id=dataset_id,
+            subset=dataset_subset if dataset_subset else None,
+            split=dataset_split or "train",
+            text_column=dataset_column if dataset_column else None,
+            shuffle=True,
+        )
+        _log(f"Dataset load: {dataset_status}")
+        lower_status = dataset_status.lower()
+        if (
+            lower_status.startswith("failed")
+            or "not found" in lower_status
+            or "install datasets" in lower_status
+            or self.prompt_source.total() == 0
+        ):
+            yield f"Dataset error: {dataset_status}"
+            return
+
+        # Persist dataset info to session metadata
+        if self.session_state:
+            self.session_state.update_prompt_source(
+                self.prompt_source.dataset_id,
+                self.prompt_source.subset,
+                self.prompt_source.split,
+                self.prompt_source.text_column,
+                self.prompt_source.index,
+            )
+            self.session_state.save(self.session_dir / "session.json")
+
         # Load model if not already loaded
-        if not self.model_loaded or self.engine is None:
+        if (
+            not self.model_loaded
+            or self.engine is None
+            or self.engine.name != engine_name
+        ):
             _log(f"Loading model: {model_name}")
             yield "Loading model (this may take a minute)..."
-            self.engine = UnslothEngine(self.config)
+            self.engine = self._create_engine(engine_name)
             self.engine.load_model()
             self.model_loaded = True
 
@@ -263,6 +312,7 @@ class TrellisApp:
 
         # Load session state and config
         self.session_state, self.config = load_session(session_path)
+        engine_name = self.session_state.engine_name or "UnSloth (4-bit + LoRA)"
 
         _log("Restoring undo stack...")
         yield "Restoring undo stack..."
@@ -274,7 +324,7 @@ class TrellisApp:
         yield "Loading model..."
 
         # Initialize engine
-        self.engine = UnslothEngine(self.config)
+        self.engine = self._create_engine(engine_name)
         self.engine.load_model()
         self.model_loaded = True
 
@@ -289,12 +339,24 @@ class TrellisApp:
 
         # Restore prompt source
         if self.session_state.prompt_source_dataset_id:
-            self.prompt_source.restore_state({
+            yield "Restoring dataset..."
+            status = self.prompt_source.restore_state({
                 "dataset_id": self.session_state.prompt_source_dataset_id,
                 "subset": self.session_state.prompt_source_subset,
                 "split": self.session_state.prompt_source_split,
+                "text_column": self.session_state.prompt_source_text_column,
                 "index": self.session_state.prompt_source_index,
             })
+            _log(f"Dataset restore: {status}")
+            lower_status = status.lower()
+            if (
+                lower_status.startswith("failed")
+                or "not found" in lower_status
+                or "install datasets" in lower_status
+                or self.prompt_source.total() == 0
+            ):
+                yield f"Dataset error: {status}"
+                return
 
         # Restore journal (just open existing)
         self.journal = Journal(self.session_dir / "journal")
@@ -387,6 +449,7 @@ class TrellisApp:
                 self.prompt_source.dataset_id,
                 self.prompt_source.subset,
                 self.prompt_source.split,
+                self.prompt_source.text_column,
                 self.prompt_source.index,
             )
             self.session_state.save(self.session_dir / "session.json")
@@ -594,6 +657,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         # Load model button (separate from Go)
         def load_model_flow(
             model, context, group,
+            engine,
             lr, kl, temp, tokens,
             rank, alpha, max_undos,
             sys_prompt, prefix, suffix,
@@ -601,6 +665,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         ):
             for status in app.load_model_only(
                 model, context, group,
+                engine,
                 lr, kl, temp, tokens,
                 rank, alpha, max_undos,
                 sys_prompt, prefix, suffix,
@@ -614,6 +679,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 config_components["model_input"],
                 config_components["context_slider"],
                 config_components["group_size"],
+                config_components["engine_dropdown"],
                 config_components["learning_rate"],
                 config_components["kl_beta"],
                 config_components["temperature"],
@@ -642,21 +708,24 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             lr, kl, temp, tokens,
             rank, alpha, max_undos,
             sys_prompt, prefix, suffix,
-            dataset_id,
+            dataset_id, dataset_subset, dataset_split, dataset_column,
         ):
             """Start training with streaming updates, then generate first prompt."""
+            success = False
             # Initialize session (this may load model if not already loaded)
             for status in app.start_training(
                 model, context, group, engine,
                 lr, kl, temp, tokens,
                 rank, alpha, max_undos,
                 sys_prompt, prefix, suffix,
-                dataset_id,
+                dataset_id, dataset_subset, dataset_split, dataset_column,
             ):
+                success = status == "Ready!"
                 yield (status, gr.skip())  # Don't change tab until ready
 
-            # Now switch to training tab
-            yield ("Switching to training...", gr.Tabs(selected=1))
+            # Only switch tabs if initialization succeeded
+            if success:
+                yield ("Switching to training...", gr.Tabs(selected=1))
 
         def generate_first_prompt():
             """Generate initial prompt and options for training screen."""
@@ -698,6 +767,9 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 config_components["prompt_prefix"],
                 config_components["prompt_suffix"],
                 config_components["dataset_input"],
+                config_components["dataset_subset"],
+                config_components["dataset_split"],
+                config_components["dataset_column"],
             ],
             outputs=[
                 config_components["go_status"],
@@ -738,11 +810,14 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 return
 
             # Resume session
+            success = False
             for status in app.resume_session(session_path):
+                success = status == "Session restored!"
                 yield (status, gr.skip())
 
-            # Switch to training tab
-            yield ("Resumed!", gr.Tabs(selected=1))
+            # Switch to training tab only if resume succeeded
+            if success:
+                yield ("Resumed!", gr.Tabs(selected=1))
 
         config_components["resume_btn"].click(
             resume_session_flow,

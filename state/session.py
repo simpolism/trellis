@@ -37,6 +37,9 @@ class SessionState:
     # User-friendly session name
     name: Optional[str] = None
 
+    # Engine used for this session
+    engine_name: Optional[str] = None
+
     # Paths relative to session directory
     config_path: str = "config.json"
     undo_stack_path: str = "undo_stack.json"
@@ -46,13 +49,14 @@ class SessionState:
     prompt_source_dataset_id: Optional[str] = None
     prompt_source_subset: Optional[str] = None
     prompt_source_split: str = "train"
+    prompt_source_text_column: Optional[str] = None
     prompt_source_index: int = 0
 
     # Training state
     current_step: int = 0
 
     @classmethod
-    def create_new(cls, session_dir: Path, config: TrellisConfig) -> "SessionState":
+    def create_new(cls, session_dir: Path, config: TrellisConfig, engine_name: Optional[str] = None) -> "SessionState":
         """Create a new session state and save config."""
         session_dir = Path(session_dir)
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +73,7 @@ class SessionState:
         state = cls(
             created_at=now,
             last_modified=now,
+            engine_name=engine_name,
         )
 
         state.save(session_dir / "session.json")
@@ -92,12 +97,14 @@ class SessionState:
         dataset_id: Optional[str],
         subset: Optional[str],
         split: str,
+        text_column: Optional[str],
         index: int,
     ) -> None:
         """Update prompt source state."""
         self.prompt_source_dataset_id = dataset_id
         self.prompt_source_subset = subset
         self.prompt_source_split = split
+        self.prompt_source_text_column = text_column
         self.prompt_source_index = index
 
     def update_step(self, step: int) -> None:

@@ -29,7 +29,9 @@ class Journal:
         self.save_dir = save_dir
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.session_path = save_dir / "session_log.md"
-        self._init_session_log()
+        # Only initialize a new log if one does not already exist (resume should append)
+        if not self.session_path.exists():
+            self._init_session_log()
 
     def _init_session_log(self):
         """Start a new session log with timestamp."""

@@ -1,13 +1,13 @@
 # 🌿 Trellis
 
-Interactive preference steering with branching state. Shape a model's personality through direct vibe-checks, explore divergent directions, and keep a narrative of how each branch came to be.
+Interactive preference steering with linear undo. Shape a model's personality through direct vibe-checks, walk changes forward/backward with checkpoints, and keep a narrative of how each step was made.
 
 ## What it does
 
 1. **Prompt** → model generates 4 response variants
 2. **Pick** → select the one with the right vibe (or reject all)
 3. **Update** → LoRA weights shift toward your preference
-4. **Branch** → explore alternatives without losing prior work
+4. **Checkpoint** → linear undo stack captures adapter/optimizer state for rewind
 
 The state tree lets you checkpoint, branch, and compare different personality trajectories. The journal logs everything for later writeups.
 
@@ -28,8 +28,9 @@ uv pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/relea
 ## Run
 
 ```bash
-python trellis.py           # launch UI
-python trellis.py --dry-run # UI without GPU (for testing)
+python trellis.py           # launch UI on port 7860
+python trellis.py --share   # launch with public URL
+python trellis.py --port 7861 --host 127.0.0.1
 ```
 
 ## Hardware
@@ -50,29 +51,25 @@ Load prompts directly from HuggingFace in the **Dataset** tab:
 
 Once loaded, use **Next Prompt** in the Steer tab to pull prompts automatically.
 
-## Tabs
+## UI Flow
 
 | Tab | Purpose |
 |-----|---------|
-| **Steer** | Core loop: generate, pick, train, re-taste |
-| **Dataset** | Load HuggingFace datasets for prompts |
-| **Tree** | View state tree, branch, checkout previous states |
-| **Compare** | A/B test two branches on the same prompt |
-| **Save** | Export adapter to disk |
-| **Journal** | Session log (everything) + lineage narrative (current branch's story) |
+| **Config** | Enter model + training hyperparams, dataset id/subset/column, VRAM estimate, and preview prompts |
+| **Train** | Generate options, pick/reject, checkpoint each step, undo/redo, edit prompts inline |
+| **Review** | Inspect session journal, view final stats, save adapters, merge LoRA, and start over |
 
 ## Config
 
-Edit `TrellisConfig` in `trellis.py` or pass `--config path/to/config.json`:
+Configure from the UI. Each session saves `config.json` alongside checkpoints. Key fields:
 
-```python
-model_name: str = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
-lora_rank: int = 16
-group_size: int = 4          # variants per generation
-temperature: float = 1.2     # sampling diversity  
-learning_rate: float = 2e-5
-kl_beta: float = 0.03        # anchor to base policy (0 disables)
-```
+- Model: `model_name`, `max_seq_length`
+- Generation: `group_size`, `temperature`, `max_new_tokens`, `min_p`
+- Training: `learning_rate`, `lora_rank`, `lora_alpha`, `kl_beta`, `max_undos`
+- Prompt shaping: `system_prompt`, `prompt_prefix`, `prompt_suffix`
+- Dataset source: HF dataset id/subset/split/column (auto-detected if possible)
+
+Currently ships with the Unsloth engine; additional engines will be selectable in future releases.
 
 ## License
 
