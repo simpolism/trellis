@@ -3,3 +3,4 @@ trellis_states/
 trellis_sessions/
 unsloth_compiled_cache/
 __pycache__/
+merged_model/

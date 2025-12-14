@@ -21,7 +21,7 @@ def build_review_screen() -> tuple[gr.Tab, dict]:
         gr.Markdown("# Review & Export")
         gr.Markdown("Review your training session and export your trained model.")
 
-        # ========== Stats Placeholder ==========
+        # ========== Stats Section ==========
         with gr.Group():
             gr.Markdown("### Training Summary")
             with gr.Row():
@@ -33,7 +33,7 @@ def build_review_screen() -> tuple[gr.Tab, dict]:
 
         gr.Markdown("---")
 
-        # ========== Config Review Placeholder ==========
+        # ========== Config Review ==========
         with gr.Accordion("Configuration Used", open=False):
             config_display = gr.JSON(label="Configuration")
 
@@ -42,7 +42,10 @@ def build_review_screen() -> tuple[gr.Tab, dict]:
         # ========== Journal Display ==========
         with gr.Group():
             gr.Markdown("### Training Journal")
-            refresh_journal_btn = gr.Button("Refresh", size="sm")
+            gr.Markdown(
+                "*A record of all choices made during this training session. "
+                "This narrative shows how the model was shaped through your preferences.*"
+            )
             journal_display = gr.Markdown(
                 "*Journal will be displayed here*",
                 elem_classes=["journal-display"],
@@ -52,14 +55,20 @@ def build_review_screen() -> tuple[gr.Tab, dict]:
 
         # ========== Export Options ==========
         with gr.Group():
-            gr.Markdown("### Export Checkpoint")
+            gr.Markdown("### Export LoRA Checkpoint")
+            gr.Markdown(
+                "*Save the LoRA adapter weights as a checkpoint. This creates a small file (~50-500MB) "
+                "containing only the trained adapter, not the full model. To use it later, you'll need "
+                "to load it alongside the same base model you used for training.*"
+            )
             checkpoint_name = gr.Textbox(
                 label="Checkpoint Name",
                 placeholder="my_trellis_adapter",
                 value="trellis_adapter",
+                info="Will be saved in your session directory",
             )
             save_checkpoint_btn = gr.Button(
-                "Save LoRA Checkpoint",
+                "Export LoRA Checkpoint",
                 variant="secondary",
             )
             checkpoint_status = gr.Markdown("")
@@ -71,16 +80,19 @@ def build_review_screen() -> tuple[gr.Tab, dict]:
             gr.Markdown("### Merge LoRA into Base Model")
             gr.Markdown(
                 "*Optional: Merge the LoRA adapter into the base model to create "
-                "a standalone model that can be shared without the base model.*"
+                "a standalone model. This produces a complete model that can be used "
+                "without loading the adapter separately. Useful for deployment or sharing.*"
             )
             gr.Markdown(
-                "**Warning:** This temporarily requires significant additional memory.",
+                "**Note:** This process may take several minutes and temporarily requires "
+                "significant additional memory.",
                 elem_classes=["disk-warning"],
             )
             merge_path = gr.Textbox(
                 label="Output Path",
                 placeholder="./merged_model",
                 value="./merged_model",
+                info="Directory where the merged model will be saved",
             )
             merge_btn = gr.Button("Merge & Save Full Model", variant="secondary")
             merge_status = gr.Markdown("")
@@ -90,7 +102,7 @@ def build_review_screen() -> tuple[gr.Tab, dict]:
         # ========== Start Over ==========
         with gr.Row():
             start_over_btn = gr.Button(
-                "Start Over",
+                "Start New Session",
                 variant="secondary",
                 size="lg",
             )
@@ -103,7 +115,6 @@ def build_review_screen() -> tuple[gr.Tab, dict]:
         # Config
         "config_display": config_display,
         # Journal
-        "refresh_journal_btn": refresh_journal_btn,
         "journal_display": journal_display,
         # Checkpoint
         "checkpoint_name": checkpoint_name,

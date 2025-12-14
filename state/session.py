@@ -34,6 +34,9 @@ class SessionState:
     created_at: str = ""
     last_modified: str = ""
 
+    # User-friendly session name
+    name: Optional[str] = None
+
     # Paths relative to session directory
     config_path: str = "config.json"
     undo_stack_path: str = "undo_stack.json"

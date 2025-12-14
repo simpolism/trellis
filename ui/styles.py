@@ -11,19 +11,33 @@ MOBILE_CSS = """
     max-width: 100% !important;
 }
 
-/* Option cards */
-.option-card {
-    font-weight: normal !important;
-    text-align: left !important;
-    white-space: pre-wrap !important;
-    min-height: 80px;
-    padding: 12px !important;
-    font-size: 14px;
-    line-height: 1.5;
+/* Option groups - show full text with scrollable content */
+.option-group {
+    border: 1px solid var(--block-border-color);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background: var(--background-fill-secondary);
 }
 
-.option-card:hover {
-    border-color: var(--primary-500) !important;
+.option-group:hover {
+    border-color: var(--primary-500);
+}
+
+/* Option text - scrollable full content */
+.option-text {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 8px 0;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Select button within option group */
+.select-btn {
+    margin-top: 8px;
 }
 
 /* Prompt display */
@@ -45,27 +59,16 @@ MOBILE_CSS = """
     margin-bottom: 12px;
 }
 
-/* Log panel */
-.log-panel {
-    font-family: monospace;
-    font-size: 12px;
-    line-height: 1.4;
-    max-height: 200px;
-    overflow-y: auto;
-}
-
 /* Mobile breakpoint */
 @media (max-width: 768px) {
-    /* Stack option cards vertically */
-    .option-row {
-        flex-direction: column !important;
+    .option-group {
+        padding: 10px;
+        margin-bottom: 10px;
     }
 
-    .option-card {
-        min-height: 60px;
-        padding: 10px !important;
+    .option-text {
+        max-height: 200px;
         font-size: 13px;
-        width: 100% !important;
     }
 
     /* Larger touch targets */
@@ -103,8 +106,8 @@ MOBILE_CSS = """
 
 /* Small mobile */
 @media (max-width: 480px) {
-    .option-card {
-        min-height: 50px;
+    .option-text {
+        max-height: 150px;
         font-size: 12px;
     }
 
@@ -121,11 +124,6 @@ MOBILE_CSS = """
         width: 100% !important;
         max-width: 100% !important;
     }
-}
-
-/* Hide tab headers for wizard-like experience (optional) */
-.hide-tabs .tabs > .tab-nav {
-    display: none !important;
 }
 
 /* Section styling */
@@ -162,7 +160,7 @@ MOBILE_CSS = """
 
 /* Journal display */
 .journal-display {
-    max-height: 400px;
+    max-height: 500px;
     overflow-y: auto;
     padding: 12px;
     background: var(--background-fill-secondary);
@@ -177,5 +175,16 @@ MOBILE_CSS = """
     border-radius: 4px;
     color: #856404;
     font-size: 13px;
+}
+
+/* Loading state for buttons */
+.loading-btn {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+/* Smooth scroll behavior */
+html {
+    scroll-behavior: smooth;
 }
 """

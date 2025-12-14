@@ -25,15 +25,20 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         # ========== Session Resume Section ==========
         with gr.Group():
             gr.Markdown("### Quick Resume")
+            gr.Markdown(
+                "*Continue a previous training session. Sessions are automatically saved "
+                "after each preference selection, so you can resume right where you left off.*"
+            )
             with gr.Row():
                 session_dropdown = gr.Dropdown(
                     label="Existing Sessions",
                     choices=[],
                     interactive=True,
-                    scale=3,
+                    scale=2,
+                    info="Select a saved session to resume",
                 )
-                refresh_sessions_btn = gr.Button("Refresh", scale=1, size="sm")
-            resume_btn = gr.Button("Resume Session", variant="secondary")
+                refresh_sessions_btn = gr.Button("🔄", scale=0, size="sm", min_width=40)
+            resume_btn = gr.Button("Resume Session Now", variant="primary")
             resume_status = gr.Markdown("")
 
         gr.Markdown("---")
@@ -41,17 +46,23 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         # ========== Dataset Section ==========
         with gr.Group():
             gr.Markdown("### Dataset")
+            gr.Markdown(
+                "*Choose the prompts that will be used to train your model. "
+                "These questions help shape the model's personality and responses.*"
+            )
             with gr.Row():
                 dataset_input = gr.Textbox(
                     label="Dataset ID",
                     value="cosmicoptima/introspection-prompts",
                     placeholder="e.g., cosmicoptima/introspection-prompts",
                     scale=3,
+                    info="HuggingFace dataset ID (e.g., 'username/dataset') or local folder path",
                 )
                 dataset_subset = gr.Textbox(
                     label="Subset (optional)",
                     placeholder="e.g., persona",
                     scale=1,
+                    info="Some datasets have multiple subsets",
                 )
             with gr.Row():
                 dataset_split = gr.Dropdown(
@@ -64,6 +75,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     label="Text Column (auto-detected)",
                     placeholder="Leave blank for auto",
                     scale=2,
+                    info="Column containing prompts (usually auto-detected)",
                 )
             load_preview_btn = gr.Button("Load & Preview", variant="secondary")
             dataset_status = gr.Markdown("")
@@ -78,10 +90,15 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         # ========== Model Section ==========
         with gr.Group():
             gr.Markdown("### Model")
+            gr.Markdown(
+                "*Select the base model to train. The model will be loaded in 4-bit "
+                "quantization with LoRA adapters for efficient training.*"
+            )
             model_input = gr.Textbox(
                 label="Model Name",
                 value="unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
-                placeholder="HuggingFace model ID",
+                placeholder="HuggingFace model ID or local path",
+                info="HuggingFace model ID (e.g., 'unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit') or local folder path",
             )
             with gr.Row():
                 context_slider = gr.Slider(
@@ -91,6 +108,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     step=256,
                     label="Context Length",
                     scale=2,
+                    info="Max tokens per prompt+response. Higher = more memory",
                 )
                 group_size = gr.Slider(
                     minimum=2,
@@ -99,6 +117,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     step=1,
                     label="Options per Prompt",
                     scale=1,
+                    info="How many response options to generate each turn",
                 )
 
         gr.Markdown("---")
@@ -106,6 +125,10 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         # ========== Training Engine Section ==========
         with gr.Group():
             gr.Markdown("### Training Engine")
+            gr.Markdown(
+                "*The training backend handles model loading and gradient updates. "
+                "UnSloth provides optimized 4-bit quantization with LoRA.*"
+            )
             engine_dropdown = gr.Dropdown(
                 choices=["UnSloth (4-bit + LoRA)"],
                 value="UnSloth (4-bit + LoRA)",
@@ -113,22 +136,8 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                 interactive=True,
             )
 
-        gr.Markdown("---")
-
-        # ========== Hyperparameters Section ==========
-        with gr.Group():
-            gr.Markdown("### Hyperparameters")
-            with gr.Row():
-                learning_rate = gr.Number(
-                    value=2e-5,
-                    label="Learning Rate",
-                    precision=6,
-                )
-                kl_beta = gr.Number(
-                    value=0.03,
-                    label="KL Beta (anchor strength)",
-                    precision=3,
-                )
+            # Engine-specific settings (generation)
+            gr.Markdown("#### Generation Settings")
             with gr.Row():
                 temperature = gr.Slider(
                     minimum=0.1,
@@ -136,6 +145,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     value=1.2,
                     step=0.1,
                     label="Temperature",
+                    info="Higher = more creative/random. Lower = more focused/deterministic",
                 )
                 max_new_tokens = gr.Slider(
                     minimum=64,
@@ -143,13 +153,31 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     value=256,
                     step=64,
                     label="Max New Tokens",
+                    info="Maximum length of generated responses",
                 )
 
-        gr.Markdown("---")
+            # Engine-specific settings (training)
+            gr.Markdown("#### Training Settings")
+            with gr.Row():
+                learning_rate = gr.Number(
+                    value=2e-5,
+                    label="Learning Rate",
+                    precision=6,
+                    info="How fast the model learns. Default (2e-5) is conservative",
+                )
+                kl_beta = gr.Number(
+                    value=0.03,
+                    label="KL Beta",
+                    precision=3,
+                    info="Anchor strength. Higher = stays closer to base model",
+                )
 
-        # ========== LoRA Settings Section ==========
-        with gr.Group():
-            gr.Markdown("### LoRA Settings")
+            # LoRA settings
+            gr.Markdown("#### LoRA Settings")
+            gr.Markdown(
+                "*LoRA (Low-Rank Adaptation) trains small adapter layers instead of the full model, "
+                "dramatically reducing memory usage.*"
+            )
             with gr.Row():
                 lora_rank = gr.Slider(
                     minimum=8,
@@ -158,6 +186,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     step=8,
                     label="Rank",
                     scale=1,
+                    info="Adapter capacity. Higher = more expressive but uses more memory",
                 )
                 lora_alpha = gr.Slider(
                     minimum=8,
@@ -166,26 +195,42 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     step=8,
                     label="Alpha",
                     scale=1,
+                    info="Scaling factor. Usually set equal to rank",
                 )
+
+        gr.Markdown("---")
+
+        # ========== Undo & Checkpoints Section ==========
+        with gr.Group():
+            gr.Markdown("### Undo & Checkpoints")
+            gr.Markdown(
+                "*Trellis saves checkpoints after each step, allowing you to undo mistakes. "
+                "Limit the number of saved checkpoints to save disk space.*"
+            )
             max_undos = gr.Number(
                 value=None,
-                label="Max Undos to Save (blank = unlimited)",
+                label="Max Checkpoints to Keep",
                 precision=0,
+                info="Leave blank for unlimited (recommended for short sessions)",
             )
             disk_warning = gr.Markdown(
-                "*Note: Each checkpoint uses ~500MB for an 8B model. "
-                "Leaving this blank will save all steps (recommended for short sessions).*",
-                elem_classes=["disk-warning"],
+                "*Each checkpoint uses ~500MB for an 8B model. "
+                "Unlimited checkpoints recommended for sessions under 50 steps.*",
             )
 
         gr.Markdown("---")
 
         # ========== System Prompt Section ==========
-        with gr.Accordion("System Prompt & Wrapping", open=False):
+        with gr.Accordion("System Prompt & Wrapping (Advanced)", open=False):
+            gr.Markdown(
+                "*Customize how prompts are formatted before being sent to the model. "
+                "Most users can leave these blank.*"
+            )
             system_prompt = gr.Textbox(
                 label="System Prompt (optional)",
                 placeholder="Custom system prompt for the model...",
                 lines=3,
+                info="Sets the model's role or persona",
             )
             with gr.Row():
                 prompt_prefix = gr.Textbox(
@@ -204,6 +249,10 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         # ========== VRAM Check Section ==========
         with gr.Group():
             gr.Markdown("### System Check")
+            gr.Markdown(
+                "*Verify your GPU has enough memory before starting. "
+                "Estimates may be slightly lower than actual usage.*"
+            )
             check_vram_btn = gr.Button("Check VRAM Requirements", variant="secondary")
             vram_display = gr.Markdown("*Click to check VRAM requirements*")
 
@@ -239,12 +288,12 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         "group_size": group_size,
         # Engine
         "engine_dropdown": engine_dropdown,
-        # Hyperparams
+        # Training (now in engine section)
         "learning_rate": learning_rate,
         "kl_beta": kl_beta,
         "temperature": temperature,
         "max_new_tokens": max_new_tokens,
-        # LoRA
+        # LoRA (now in engine section)
         "lora_rank": lora_rank,
         "lora_alpha": lora_alpha,
         "max_undos": max_undos,

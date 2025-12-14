@@ -26,47 +26,68 @@ def build_training_screen() -> tuple[gr.Tab, dict]:
 
         gr.Markdown("---")
 
-        # ========== Prompt Display ==========
+        # ========== Prompt Display (Inline Editable) ==========
+        # The prompt area can switch between display and edit modes
         prompt_display = gr.Markdown(
             "*Waiting for prompt...*",
             elem_classes=["prompt-card"],
+            visible=True,
         )
+        prompt_edit_input = gr.Textbox(
+            label="Edit Prompt",
+            lines=4,
+            visible=False,
+            placeholder="Edit the prompt and regenerate...",
+        )
+        with gr.Row(visible=False) as edit_buttons_row:
+            apply_edit_btn = gr.Button("Apply & Regenerate", variant="primary", size="sm")
+            cancel_edit_btn = gr.Button("Cancel", variant="secondary", size="sm")
 
-        # ========== Edit Prompt ==========
-        with gr.Accordion("Edit Question", open=False) as edit_accordion:
-            edit_prompt_input = gr.Textbox(
-                label="Edit the current question",
-                lines=3,
-                placeholder="Modify the question and regenerate...",
-            )
-            with gr.Row():
-                apply_edit_btn = gr.Button("Apply & Regenerate", variant="secondary")
-                cancel_edit_btn = gr.Button("Cancel", variant="stop")
+        # Edit button (toggles prompt to edit mode)
+        edit_prompt_btn = gr.Button("✏️ Edit Prompt", size="sm", variant="secondary")
 
         gr.Markdown("---")
 
         # ========== Option Cards ==========
+        # Each option shows full text in a scrollable markdown area with a select button
         gr.Markdown("### Select your preference:")
 
-        # Dynamic option display - supports up to 8 options
-        option_btns = []
-        with gr.Row(elem_classes=["option-row"]):
-            opt_a = gr.Button("Option A", elem_classes=["option-card"], visible=True)
-            opt_b = gr.Button("Option B", elem_classes=["option-card"], visible=True)
-            option_btns.extend([opt_a, opt_b])
+        # Option A
+        with gr.Group(elem_classes=["option-group"]):
+            opt_a_text = gr.Markdown("*Option A*", elem_classes=["option-text"])
+            opt_a_btn = gr.Button("Select A", size="sm", variant="primary", elem_classes=["select-btn"])
 
-        with gr.Row(elem_classes=["option-row"]):
-            opt_c = gr.Button("Option C", elem_classes=["option-card"], visible=True)
-            opt_d = gr.Button("Option D", elem_classes=["option-card"], visible=True)
-            option_btns.extend([opt_c, opt_d])
+        # Option B
+        with gr.Group(elem_classes=["option-group"]):
+            opt_b_text = gr.Markdown("*Option B*", elem_classes=["option-text"])
+            opt_b_btn = gr.Button("Select B", size="sm", variant="primary", elem_classes=["select-btn"])
 
-        # Extra options for group_size > 4
-        with gr.Row(elem_classes=["option-row"], visible=False) as extra_row:
-            opt_e = gr.Button("Option E", elem_classes=["option-card"], visible=False)
-            opt_f = gr.Button("Option F", elem_classes=["option-card"], visible=False)
-            opt_g = gr.Button("Option G", elem_classes=["option-card"], visible=False)
-            opt_h = gr.Button("Option H", elem_classes=["option-card"], visible=False)
-            option_btns.extend([opt_e, opt_f, opt_g, opt_h])
+        # Option C
+        with gr.Group(elem_classes=["option-group"]):
+            opt_c_text = gr.Markdown("*Option C*", elem_classes=["option-text"])
+            opt_c_btn = gr.Button("Select C", size="sm", variant="primary", elem_classes=["select-btn"])
+
+        # Option D
+        with gr.Group(elem_classes=["option-group"]):
+            opt_d_text = gr.Markdown("*Option D*", elem_classes=["option-text"])
+            opt_d_btn = gr.Button("Select D", size="sm", variant="primary", elem_classes=["select-btn"])
+
+        # Extra options for group_size > 4 (hidden by default)
+        with gr.Group(elem_classes=["option-group"], visible=False) as opt_e_group:
+            opt_e_text = gr.Markdown("*Option E*", elem_classes=["option-text"])
+            opt_e_btn = gr.Button("Select E", size="sm", variant="primary", elem_classes=["select-btn"])
+
+        with gr.Group(elem_classes=["option-group"], visible=False) as opt_f_group:
+            opt_f_text = gr.Markdown("*Option F*", elem_classes=["option-text"])
+            opt_f_btn = gr.Button("Select F", size="sm", variant="primary", elem_classes=["select-btn"])
+
+        with gr.Group(elem_classes=["option-group"], visible=False) as opt_g_group:
+            opt_g_text = gr.Markdown("*Option G*", elem_classes=["option-text"])
+            opt_g_btn = gr.Button("Select G", size="sm", variant="primary", elem_classes=["select-btn"])
+
+        with gr.Group(elem_classes=["option-group"], visible=False) as opt_h_group:
+            opt_h_text = gr.Markdown("*Option H*", elem_classes=["option-text"])
+            opt_h_btn = gr.Button("Select H", size="sm", variant="primary", elem_classes=["select-btn"])
 
         gr.Markdown("---")
 
@@ -76,67 +97,74 @@ def build_training_screen() -> tuple[gr.Tab, dict]:
             skip_btn = gr.Button("Skip")
             undo_btn = gr.Button("Undo")
 
-        undo_status = gr.Markdown("")
-
-        gr.Markdown("---")
-
-        # ========== Log Panel ==========
-        with gr.Accordion("Log", open=True):
-            log_output = gr.Textbox(
-                lines=6,
-                interactive=False,
-                show_label=False,
-                elem_classes=["log-panel"],
-                placeholder="Training log will appear here...",
-            )
+        undo_status = gr.Markdown("", visible=True)
 
         gr.Markdown("---")
 
         # ========== Bottom Actions ==========
         with gr.Row():
-            save_session_btn = gr.Button("Save Session", variant="secondary")
-            sample_btn = gr.Button("Sample", interactive=False)  # Placeholder
-            journal_btn = gr.Button("View Journal", interactive=False)  # Placeholder
-            done_btn = gr.Button("Done", variant="primary")
+            with gr.Column(scale=2):
+                save_session_name = gr.Textbox(
+                    label="Session Name",
+                    placeholder="my_training_session",
+                    info="Name for saving this session",
+                )
+            with gr.Column(scale=1):
+                save_session_btn = gr.Button("Save Session", variant="secondary")
 
         save_status = gr.Markdown("")
+
+        gr.Markdown("---")
+
+        with gr.Row():
+            done_btn = gr.Button("Done - Review Results", variant="primary", size="lg")
 
     components = {
         # Header
         "step_display": step_display,
         "drift_display": drift_display,
         "dataset_info": dataset_info,
-        # Prompt
+        # Prompt (inline editable)
         "prompt_display": prompt_display,
-        # Edit
-        "edit_accordion": edit_accordion,
-        "edit_prompt_input": edit_prompt_input,
+        "prompt_edit_input": prompt_edit_input,
+        "edit_buttons_row": edit_buttons_row,
         "apply_edit_btn": apply_edit_btn,
         "cancel_edit_btn": cancel_edit_btn,
-        # Options
-        "opt_a": opt_a,
-        "opt_b": opt_b,
-        "opt_c": opt_c,
-        "opt_d": opt_d,
-        "opt_e": opt_e,
-        "opt_f": opt_f,
-        "opt_g": opt_g,
-        "opt_h": opt_h,
-        "option_btns": option_btns,
-        "extra_row": extra_row,
+        "edit_prompt_btn": edit_prompt_btn,
+        # Options - text displays
+        "opt_a_text": opt_a_text,
+        "opt_b_text": opt_b_text,
+        "opt_c_text": opt_c_text,
+        "opt_d_text": opt_d_text,
+        "opt_e_text": opt_e_text,
+        "opt_f_text": opt_f_text,
+        "opt_g_text": opt_g_text,
+        "opt_h_text": opt_h_text,
+        # Options - select buttons
+        "opt_a_btn": opt_a_btn,
+        "opt_b_btn": opt_b_btn,
+        "opt_c_btn": opt_c_btn,
+        "opt_d_btn": opt_d_btn,
+        "opt_e_btn": opt_e_btn,
+        "opt_f_btn": opt_f_btn,
+        "opt_g_btn": opt_g_btn,
+        "opt_h_btn": opt_h_btn,
+        # Option groups (for visibility control)
+        "opt_e_group": opt_e_group,
+        "opt_f_group": opt_f_group,
+        "opt_g_group": opt_g_group,
+        "opt_h_group": opt_h_group,
         # Actions
         "none_btn": none_btn,
         "skip_btn": skip_btn,
         "undo_btn": undo_btn,
         "undo_status": undo_status,
-        # Log
-        "log_output": log_output,
-        # Bottom
+        # Save
+        "save_session_name": save_session_name,
         "save_session_btn": save_session_btn,
-        "sample_btn": sample_btn,
-        "journal_btn": journal_btn,
-        "done_btn": done_btn,
         "save_status": save_status,
+        # Navigation
+        "done_btn": done_btn,
     }
 
     return tab, components

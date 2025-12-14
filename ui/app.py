@@ -51,7 +51,6 @@ class TrellisApp:
         self.step_count: int = 0
         self.current_prompt: Optional[str] = None
         self.current_options: list[str] = []
-        self.log_lines: list[str] = []
 
     # =========================================================================
     # Screen 1: Config Methods
@@ -60,7 +59,13 @@ class TrellisApp:
     def discover_sessions(self) -> list[tuple[str, str]]:
         """Find existing sessions for resume dropdown."""
         sessions = SessionState.discover_sessions(str(self.base_save_dir))
-        return [(f"{name} ({s.last_modified[:10]})", path) for name, s, path in sessions]
+        result = []
+        for dir_name, s, path in sessions:
+            # Use custom name if set, otherwise use directory name
+            display_name = s.name if s.name else dir_name
+            date_str = s.last_modified[:10] if s.last_modified else "unknown"
+            result.append((f"{display_name} ({date_str})", path))
+        return result
 
     def preview_dataset(
         self,
@@ -192,11 +197,11 @@ class TrellisApp:
         self.undo_stack.push(root)
 
         self.step_count = 0
-        self._add_log("Session started")
-        self._add_log(f"Model: {self.config.model_name}")
-        self._add_log(f"Dataset: {self.prompt_source.dataset_id} ({self.prompt_source.total()} prompts)")
+        print(f"[Trellis] Session started")
+        print(f"[Trellis] Model: {self.config.model_name}")
+        print(f"[Trellis] Dataset: {self.prompt_source.dataset_id} ({self.prompt_source.total()} prompts)")
 
-        yield "Ready! Generating first prompt..."
+        yield "Ready!"
 
     def resume_session(self, session_path: str):
         """Resume an existing session."""
@@ -240,7 +245,7 @@ class TrellisApp:
 
         self.step_count = current.step_count if current else 0
 
-        self._add_log(f"Resumed session at step {self.step_count}")
+        print(f"[Trellis] Resumed session at step {self.step_count}")
 
         yield "Session restored!"
 
@@ -258,12 +263,12 @@ class TrellisApp:
         if not self.current_prompt:
             return "No prompts available. Load a dataset first.", []
 
-        self._add_log(f"[{self._timestamp()}] Generating options...")
+        print(f"[Trellis] Generating options for: {self.current_prompt[:80]}...")
 
         # Generate options
         self.current_options = self.engine.generate_options(self.current_prompt)
 
-        self._add_log(f"[{self._timestamp()}] Generated {len(self.current_options)} options")
+        print(f"[Trellis] Generated {len(self.current_options)} options")
 
         if self.journal:
             self.journal.log_generation(self.current_prompt, len(self.current_options))
@@ -278,7 +283,7 @@ class TrellisApp:
         choice_label = f"Option {chr(65 + choice_idx)}" if choice_idx < len(self.current_options) else "Reject All"
         chosen_response = self.current_options[choice_idx] if choice_idx < len(self.current_options) else ""
 
-        self._add_log(f"[{self._timestamp()}] Training on {choice_label}...")
+        print(f"[Trellis] Training on {choice_label}...")
 
         # Train
         status, metrics = self.engine.train_step(choice_idx)
@@ -286,12 +291,12 @@ class TrellisApp:
 
         self.step_count += 1
 
-        self._add_log(f"[{self._timestamp()}] Step {self.step_count}: {status} | drift={drift:.3f}")
+        print(f"[Trellis] Step {self.step_count}: {status} | drift={drift:.3f}")
 
-        # Log to journal
+        # Log to journal (detailed format)
         if self.journal:
             if choice_idx < len(self.current_options):
-                self.journal.log_train(
+                self.journal.log_train_detailed(
                     self.step_count,
                     self.current_prompt or "",
                     choice_label,
@@ -337,7 +342,7 @@ class TrellisApp:
         if self.journal and self.current_prompt:
             self.journal.log_skip(self.step_count, self.current_prompt)
 
-        self._add_log(f"[{self._timestamp()}] Skipped prompt")
+        print(f"[Trellis] Skipped prompt")
 
         return "Skipped"
 
@@ -361,7 +366,7 @@ class TrellisApp:
             if self.journal:
                 self.journal.log_undo(old_step, self.step_count)
 
-            self._add_log(f"[{self._timestamp()}] Undo: step {old_step} -> {self.step_count}")
+            print(f"[Trellis] Undo: step {old_step} -> {self.step_count}")
 
             return checkpoint, f"Undone to step {self.step_count}"
 
@@ -371,31 +376,31 @@ class TrellisApp:
         """Apply an edited prompt and regenerate."""
         self.current_prompt = new_prompt
 
-        self._add_log(f"[{self._timestamp()}] Regenerating with edited prompt...")
+        print(f"[Trellis] Regenerating with edited prompt...")
 
         self.current_options = self.engine.generate_options(new_prompt)
 
-        self._add_log(f"[{self._timestamp()}] Generated {len(self.current_options)} options")
+        print(f"[Trellis] Generated {len(self.current_options)} options")
 
         return new_prompt, self.current_options
 
-    def save_session(self) -> str:
-        """Save current session state."""
+    def save_session_with_name(self, name: str) -> str:
+        """Save current session with a custom name."""
         if not self.session_state or not self.session_dir:
             return "No active session"
+
+        # Update session name if provided
+        if name and name.strip():
+            self.session_state.name = name.strip()
 
         self.session_state.save(self.session_dir / "session.json")
 
         if self.journal:
             self.journal.log_session_save(str(self.session_dir))
 
-        self._add_log(f"[{self._timestamp()}] Session saved to {self.session_dir}")
+        print(f"[Trellis] Session saved: {name or self.session_dir.name}")
 
-        return f"Session saved to {self.session_dir}"
-
-    def get_log(self) -> str:
-        """Get current log content."""
-        return "\n".join(self.log_lines[-50:])  # Keep last 50 lines
+        return f"Session saved as '{name or self.session_dir.name}'"
 
     def get_stats(self) -> tuple[str, str, str]:
         """Get current stats for display."""
@@ -429,7 +434,7 @@ class TrellisApp:
         path = self.session_dir / name if self.session_dir else Path(name)
         self.engine.save_adapter(str(path))
 
-        return f"Checkpoint saved to {path}"
+        return f"LoRA checkpoint saved to {path}"
 
     def merge_lora(self, output_path: str) -> str:
         """Merge LoRA into base model."""
@@ -453,18 +458,20 @@ class TrellisApp:
         """Get current timestamp for logs."""
         return datetime.now().strftime("%H:%M:%S")
 
-    def _add_log(self, message: str):
-        """Add a message to the log."""
-        self.log_lines.append(message)
-        # Keep only last 100 lines
-        if len(self.log_lines) > 100:
-            self.log_lines = self.log_lines[-100:]
+
+# JavaScript for scrolling to top of page on tab switch
+SCROLL_TO_TOP_JS = """
+function scrollToTop() {
+    window.scrollTo({top: 0, behavior: 'smooth'});
+    return [];
+}
+"""
 
 
 def build_ui(app: TrellisApp) -> gr.Blocks:
     """Build the complete Gradio UI and wire up events."""
 
-    with gr.Blocks(title="Trellis") as demo:
+    with gr.Blocks(title="Trellis", css=MOBILE_CSS, js=SCROLL_TO_TOP_JS) as demo:
         gr.Markdown("# Trellis")
         gr.Markdown("*Interactive preference steering for language models*")
 
@@ -522,6 +529,14 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             outputs=[config_components["vram_display"]],
         )
 
+        def format_options_for_display(options: list[str]) -> list[str]:
+            """Format options as markdown for display (no truncation)."""
+            formatted = []
+            for i, opt in enumerate(options[:8]):
+                label = chr(65 + i)
+                formatted.append(f"**Option {label}:**\n\n{opt}")
+            return formatted
+
         def start_training_flow(
             model, context, group, engine,
             lr, kl, temp, tokens,
@@ -529,8 +544,8 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             sys_prompt, prefix, suffix,
             dataset_id,
         ):
-            """Start training with streaming updates."""
-            # Yield status updates
+            """Start training with streaming updates, then generate first prompt."""
+            # Yield status updates during loading
             for status in app.start_training(
                 model, context, group, engine,
                 lr, kl, temp, tokens,
@@ -538,14 +553,32 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 sys_prompt, prefix, suffix,
                 dataset_id,
             ):
-                yield status, gr.Tabs(selected=1)
+                yield (
+                    status,  # go_status
+                    gr.Tabs(selected=0),  # stay on setup tab during loading
+                    gr.skip(), gr.skip(), gr.skip(),  # stats
+                    gr.skip(),  # prompt
+                    gr.skip(), gr.skip(), gr.skip(), gr.skip(),  # options A-D
+                )
 
-            # After loading, generate first prompt
+            # Generate first prompt
             prompt, options = app.generate_and_display()
             stats = app.get_stats()
 
-            # This final yield switches to training tab
-            yield "Ready!", gr.Tabs(selected=1)
+            # Format options for display
+            opt_texts = format_options_for_display(options)
+
+            # Switch to training tab
+            yield (
+                "Ready!",  # go_status
+                gr.Tabs(selected=1),  # switch to training tab
+                stats[0], stats[1], stats[2],  # stats
+                f"**Prompt:**\n\n{prompt}",  # prompt display
+                opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
+                opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
+                opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
+                opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+            )
 
         config_components["go_btn"].click(
             start_training_flow,
@@ -569,6 +602,76 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             outputs=[
                 config_components["go_status"],
                 tabs,
+                training_components["step_display"],
+                training_components["drift_display"],
+                training_components["dataset_info"],
+                training_components["prompt_display"],
+                training_components["opt_a_text"],
+                training_components["opt_b_text"],
+                training_components["opt_c_text"],
+                training_components["opt_d_text"],
+            ],
+        )
+
+        # Resume session handler
+        def resume_session_flow(session_dropdown):
+            """Resume session and go directly to training."""
+            if not session_dropdown:
+                yield "Please select a session to resume", gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
+                return
+
+            # Find the session path from the dropdown value
+            sessions = app.discover_sessions()
+            session_path = None
+            for display_name, path in sessions:
+                if display_name == session_dropdown:
+                    session_path = path
+                    break
+
+            if not session_path:
+                yield "Session not found", gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
+                return
+
+            # Resume session
+            for status in app.resume_session(session_path):
+                yield (
+                    status,
+                    gr.Tabs(selected=0),
+                    gr.skip(), gr.skip(), gr.skip(),
+                    gr.skip(),
+                    gr.skip(), gr.skip(), gr.skip(), gr.skip(),
+                )
+
+            # Generate first prompt
+            prompt, options = app.generate_and_display()
+            stats = app.get_stats()
+            opt_texts = format_options_for_display(options)
+
+            yield (
+                "Resumed!",
+                gr.Tabs(selected=1),
+                stats[0], stats[1], stats[2],
+                f"**Prompt:**\n\n{prompt}",
+                opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
+                opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
+                opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
+                opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+            )
+
+        config_components["resume_btn"].click(
+            resume_session_flow,
+            inputs=[config_components["session_dropdown"]],
+            outputs=[
+                config_components["resume_status"],
+                tabs,
+                training_components["step_display"],
+                training_components["drift_display"],
+                training_components["dataset_info"],
+                training_components["prompt_display"],
+                training_components["opt_a_text"],
+                training_components["opt_b_text"],
+                training_components["opt_c_text"],
+                training_components["opt_d_text"],
             ],
         )
 
@@ -576,87 +679,75 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         # Screen 2 Event Handlers
         # =====================================================================
 
-        def generate_next():
+        # Common outputs for option/action buttons
+        training_outputs = [
+            training_components["prompt_display"],
+            training_components["step_display"],
+            training_components["drift_display"],
+            training_components["dataset_info"],
+            training_components["opt_a_text"],
+            training_components["opt_b_text"],
+            training_components["opt_c_text"],
+            training_components["opt_d_text"],
+            training_components["undo_status"],
+        ]
+
+        def generate_next_with_loading():
+            """Generate next prompt and options."""
             prompt, options = app.generate_and_display()
             stats = app.get_stats()
-            log = app.get_log()
-
-            # Format options for buttons
-            btn_updates = []
-            for i, opt in enumerate(options[:4]):
-                label = f"{chr(65+i)}: {opt[:200]}..." if len(opt) > 200 else f"{chr(65+i)}: {opt}"
-                btn_updates.append(gr.Button(value=label, visible=True))
-
-            # Hide unused buttons
-            for i in range(len(options), 4):
-                btn_updates.append(gr.Button(visible=False))
+            opt_texts = format_options_for_display(options)
 
             return (
                 f"**Prompt:**\n\n{prompt}",
                 stats[0], stats[1], stats[2],
-                log,
-                *btn_updates,
+                opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
+                opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
+                opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
+                opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+                "",  # Clear undo status
             )
 
         def select_and_advance(choice_idx):
             """Select option, train, then generate next."""
             app.select_option(choice_idx)
-            return generate_next()
+            return generate_next_with_loading()
 
-        # Wire option buttons
-        for i, btn_key in enumerate(["opt_a", "opt_b", "opt_c", "opt_d"]):
-            training_components[btn_key].click(
-                lambda idx=i: select_and_advance(idx),
-                outputs=[
-                    training_components["prompt_display"],
-                    training_components["step_display"],
-                    training_components["drift_display"],
-                    training_components["dataset_info"],
-                    training_components["log_output"],
-                    training_components["opt_a"],
-                    training_components["opt_b"],
-                    training_components["opt_c"],
-                    training_components["opt_d"],
-                ],
-            )
+        # Wire option select buttons
+        training_components["opt_a_btn"].click(
+            lambda: select_and_advance(0),
+            outputs=training_outputs,
+        )
+        training_components["opt_b_btn"].click(
+            lambda: select_and_advance(1),
+            outputs=training_outputs,
+        )
+        training_components["opt_c_btn"].click(
+            lambda: select_and_advance(2),
+            outputs=training_outputs,
+        )
+        training_components["opt_d_btn"].click(
+            lambda: select_and_advance(3),
+            outputs=training_outputs,
+        )
 
         def reject_all():
             """Reject all options and train."""
             app.select_option(app.config.group_size if app.config else 4)
-            return generate_next()
+            return generate_next_with_loading()
 
         training_components["none_btn"].click(
             reject_all,
-            outputs=[
-                training_components["prompt_display"],
-                training_components["step_display"],
-                training_components["drift_display"],
-                training_components["dataset_info"],
-                training_components["log_output"],
-                training_components["opt_a"],
-                training_components["opt_b"],
-                training_components["opt_c"],
-                training_components["opt_d"],
-            ],
+            outputs=training_outputs,
         )
 
         def skip():
             app.skip_prompt()
-            return generate_next()
+            return generate_next_with_loading()
 
         training_components["skip_btn"].click(
             skip,
-            outputs=[
-                training_components["prompt_display"],
-                training_components["step_display"],
-                training_components["drift_display"],
-                training_components["dataset_info"],
-                training_components["log_output"],
-                training_components["opt_a"],
-                training_components["opt_b"],
-                training_components["opt_c"],
-                training_components["opt_d"],
-            ],
+            outputs=training_outputs,
         )
 
         def undo():
@@ -665,57 +756,113 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 # Restore previous options
                 prompt = checkpoint.prompt or "*Previous prompt*"
                 options = checkpoint.options
-
-                btn_updates = []
-                for i, opt in enumerate(options[:4]):
-                    label = f"{chr(65+i)}: {opt[:200]}..." if len(opt) > 200 else f"{chr(65+i)}: {opt}"
-                    btn_updates.append(gr.Button(value=label, visible=True))
-
-                for i in range(len(options), 4):
-                    btn_updates.append(gr.Button(visible=False))
-
+                opt_texts = format_options_for_display(options)
                 stats = app.get_stats()
-                log = app.get_log()
 
                 return (
-                    status,
                     f"**Prompt:**\n\n{prompt}",
                     stats[0], stats[1], stats[2],
-                    log,
-                    *btn_updates,
+                    opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
+                    opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
+                    opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
+                    opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+                    status,
                 )
             else:
                 return (
+                    gr.skip(),
+                    gr.skip(), gr.skip(), gr.skip(),
+                    gr.skip(), gr.skip(), gr.skip(), gr.skip(),
                     status,
-                    gr.skip(), gr.skip(), gr.skip(), gr.skip(),
-                    app.get_log(),
-                    gr.skip(), gr.skip(), gr.skip(), gr.skip(),
                 )
 
         training_components["undo_btn"].click(
             undo,
+            outputs=training_outputs,
+        )
+
+        # Inline prompt editing handlers
+        def enter_edit_mode():
+            """Switch to edit mode."""
+            return (
+                gr.Markdown(visible=False),  # hide prompt display
+                gr.Textbox(visible=True, value=app.current_prompt or ""),  # show edit input
+                gr.Row(visible=True),  # show edit buttons
+                gr.Button(visible=False),  # hide edit button
+            )
+
+        def cancel_edit_mode():
+            """Exit edit mode without changes."""
+            return (
+                gr.Markdown(visible=True),  # show prompt display
+                gr.Textbox(visible=False),  # hide edit input
+                gr.Row(visible=False),  # hide edit buttons
+                gr.Button(visible=True),  # show edit button
+            )
+
+        def apply_edit_and_regenerate(new_prompt):
+            """Apply edited prompt and regenerate options."""
+            prompt, options = app.apply_edited_prompt(new_prompt)
+            opt_texts = format_options_for_display(options)
+            stats = app.get_stats()
+
+            return (
+                gr.Markdown(visible=True, value=f"**Prompt:**\n\n{prompt}"),  # show updated prompt
+                gr.Textbox(visible=False),  # hide edit input
+                gr.Row(visible=False),  # hide edit buttons
+                gr.Button(visible=True),  # show edit button
+                opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
+                opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
+                opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
+                opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+            )
+
+        training_components["edit_prompt_btn"].click(
+            enter_edit_mode,
             outputs=[
-                training_components["undo_status"],
                 training_components["prompt_display"],
-                training_components["step_display"],
-                training_components["drift_display"],
-                training_components["dataset_info"],
-                training_components["log_output"],
-                training_components["opt_a"],
-                training_components["opt_b"],
-                training_components["opt_c"],
-                training_components["opt_d"],
+                training_components["prompt_edit_input"],
+                training_components["edit_buttons_row"],
+                training_components["edit_prompt_btn"],
             ],
         )
 
-        def save_session():
-            return app.save_session()
+        training_components["cancel_edit_btn"].click(
+            cancel_edit_mode,
+            outputs=[
+                training_components["prompt_display"],
+                training_components["prompt_edit_input"],
+                training_components["edit_buttons_row"],
+                training_components["edit_prompt_btn"],
+            ],
+        )
+
+        training_components["apply_edit_btn"].click(
+            apply_edit_and_regenerate,
+            inputs=[training_components["prompt_edit_input"]],
+            outputs=[
+                training_components["prompt_display"],
+                training_components["prompt_edit_input"],
+                training_components["edit_buttons_row"],
+                training_components["edit_prompt_btn"],
+                training_components["opt_a_text"],
+                training_components["opt_b_text"],
+                training_components["opt_c_text"],
+                training_components["opt_d_text"],
+            ],
+        )
+
+        # Save session with name
+        def save_session(name):
+            return app.save_session_with_name(name)
 
         training_components["save_session_btn"].click(
             save_session,
+            inputs=[training_components["save_session_name"]],
             outputs=[training_components["save_status"]],
         )
 
+        # Go to review
         def go_to_review():
             stats = app.get_final_stats()
             journal = app.get_journal_content()
@@ -737,14 +884,6 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         # Screen 3 Event Handlers
         # =====================================================================
 
-        def refresh_journal():
-            return app.get_journal_content()
-
-        review_components["refresh_journal_btn"].click(
-            refresh_journal,
-            outputs=[review_components["journal_display"]],
-        )
-
         def save_checkpoint(name):
             return app.save_checkpoint(name)
 
@@ -755,7 +894,10 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         )
 
         def merge_model(path):
-            return app.merge_lora(path)
+            # Show loading message first
+            yield "Merging model... This may take several minutes."
+            result = app.merge_lora(path)
+            yield result
 
         review_components["merge_btn"].click(
             merge_model,
