@@ -15,9 +15,12 @@ MOBILE_CSS = """
 .option-group {
     border: 1px solid var(--block-border-color);
     border-radius: 8px;
-    padding: 8px 12px;
+    padding: 4px 12px 8px 12px;  /* Reduced top padding */
     margin-bottom: 8px;
     background: var(--background-fill-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .option-group:hover {
@@ -28,11 +31,24 @@ MOBILE_CSS = """
 .option-text {
     max-height: 250px;
     overflow-y: auto;
-    padding: 4px 0;
+    padding: 0;
     font-size: 14px;
     line-height: 1.5;
     white-space: pre-wrap;
     word-wrap: break-word;
+}
+
+/* Flatten ALL nested Gradio divs to prevent double scrollbars */
+.option-text * {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
+
+/* Re-apply scroll only to the container itself */
+.option-text {
+    overflow-y: auto !important;
 }
 
 /* Remove extra margins from markdown inside options */
@@ -58,6 +74,14 @@ MOBILE_CSS = """
     margin-bottom: 8px;
 }
 
+/* Prevent loading opacity on prompt during generation - keep readable */
+.prompt-card,
+.prompt-card.pending,
+.prompt-card * {
+    opacity: 1 !important;
+    transition: none !important;
+}
+
 /* Stats header */
 .stats-header {
     display: flex;
@@ -66,6 +90,14 @@ MOBILE_CSS = """
     background: var(--block-background-fill);
     border-radius: 6px;
     margin-bottom: 8px;
+}
+
+/* Prevent loading opacity on stats during generation - keep readable */
+.stats-header,
+.stats-header.pending,
+.stats-header * {
+    opacity: 1 !important;
+    transition: none !important;
 }
 
 /* Mobile breakpoint */
@@ -174,6 +206,24 @@ MOBILE_CSS = """
     padding: 12px;
     background: var(--background-fill-secondary);
     border-radius: 8px;
+}
+
+/* Flatten ALL nested Gradio divs to prevent double scrollbars */
+.journal-display * {
+    max-height: none !important;
+    overflow: visible !important;
+}
+
+/* Re-apply scroll only to the container itself */
+.journal-display {
+    overflow-y: auto !important;
+}
+
+/* Prevent loading opacity on journal - keep readable */
+.journal-display,
+.journal-display.pending {
+    opacity: 1 !important;
+    transition: none !important;
 }
 
 /* Disk usage warning */
