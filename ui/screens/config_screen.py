@@ -29,15 +29,12 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                 "*Continue a previous training session. Sessions are automatically saved "
                 "after each preference selection, so you can resume right where you left off.*"
             )
-            with gr.Row():
-                session_dropdown = gr.Dropdown(
-                    label="Existing Sessions",
-                    choices=[],
-                    interactive=True,
-                    scale=2,
-                    info="Select a saved session to resume",
-                )
-                refresh_sessions_btn = gr.Button("🔄", scale=0, size="sm", min_width=40)
+            session_dropdown = gr.Dropdown(
+                label="Existing Sessions",
+                choices=[],
+                interactive=True,
+                info="Select a saved session to resume",
+            )
             resume_btn = gr.Button("Resume Session Now", variant="primary")
             resume_status = gr.Markdown("")
 
@@ -264,7 +261,6 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
     components = {
         # Session resume
         "session_dropdown": session_dropdown,
-        "refresh_sessions_btn": refresh_sessions_btn,
         "resume_btn": resume_btn,
         "resume_status": resume_status,
         # Dataset

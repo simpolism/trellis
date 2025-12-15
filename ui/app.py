@@ -616,11 +616,6 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             choices = [s[0] for s in sessions]
             return gr.Dropdown(choices=choices)
 
-        config_components["refresh_sessions_btn"].click(
-            refresh_sessions,
-            outputs=[config_components["session_dropdown"]],
-        )
-
         def preview_dataset(dataset_id, subset, split, column):
             status, q1, q2, q3 = app.preview_dataset(dataset_id, subset, split, column)
             return status, q1, q2, q3
@@ -697,12 +692,9 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         )
 
         def format_options_for_display(options: list[str]) -> list[str]:
-            """Format options as markdown for display (no truncation)."""
-            formatted = []
-            for i, opt in enumerate(options[:8]):
-                label = chr(65 + i)
-                formatted.append(f"**Option {label}:**\n\n{opt}")
-            return formatted
+            """Format options as plain text for display (no truncation)."""
+            # Just return the raw text - labels are shown separately
+            return [opt for opt in options[:8]]
 
         def start_training_flow(
             model, context, group, engine,
@@ -734,7 +726,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 yield (
                     "**Step:** 0", "**Drift:** 0.000", "**Dataset:** Not loaded",
                     "*Model not loaded*",
-                    "*Option A*", "*Option B*", "*Option C*", "*Option D*",
+                    "", "", "", "",
                 )
                 return
 
@@ -749,10 +741,10 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             yield (
                 stats[0], stats[1], stats[2],
                 f"**Prompt:**\n\n{app.current_prompt}",
-                "*Generating...*",
-                "*Generating...*",
-                "*Generating...*",
-                "*Generating...*",
+                "Generating...",
+                "Generating...",
+                "Generating...",
+                "Generating...",
             )
 
             # Generate options (slow - model inference)
@@ -767,10 +759,10 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             yield (
                 stats[0], stats[1], stats[2],
                 f"**Prompt:**\n\n{app.current_prompt}",
-                opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
-                opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
-                opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
-                opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+                opt_texts[0] if len(opt_texts) > 0 else "",
+                opt_texts[1] if len(opt_texts) > 1 else "",
+                opt_texts[2] if len(opt_texts) > 2 else "",
+                opt_texts[3] if len(opt_texts) > 3 else "",
             )
 
         config_components["go_btn"].click(
@@ -897,7 +889,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 yield (
                     "**Step:** 0", "**Drift:** 0.000", "**Dataset:** Not loaded",
                     "*Model not loaded*",
-                    "*Option A*", "*Option B*", "*Option C*", "*Option D*",
+                    "", "", "", "",
                     "",
                 )
                 return
@@ -913,10 +905,10 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             yield (
                 stats[0], stats[1], stats[2],
                 f"**Prompt:**\n\n{app.current_prompt}",
-                "*Generating...*",
-                "*Generating...*",
-                "*Generating...*",
-                "*Generating...*",
+                "Generating...",
+                "Generating...",
+                "Generating...",
+                "Generating...",
                 "",
             )
 
@@ -932,10 +924,10 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             yield (
                 stats[0], stats[1], stats[2],
                 f"**Prompt:**\n\n{app.current_prompt}",
-                opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
-                opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
-                opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
-                opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+                opt_texts[0] if len(opt_texts) > 0 else "",
+                opt_texts[1] if len(opt_texts) > 1 else "",
+                opt_texts[2] if len(opt_texts) > 2 else "",
+                opt_texts[3] if len(opt_texts) > 3 else "",
                 "",
             )
 
@@ -1013,10 +1005,10 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 return (
                     stats[0], stats[1], stats[2],
                     f"**Prompt:**\n\n{prompt}",
-                    opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
-                    opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
-                    opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
-                    opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+                    opt_texts[0] if len(opt_texts) > 0 else "",
+                    opt_texts[1] if len(opt_texts) > 1 else "",
+                    opt_texts[2] if len(opt_texts) > 2 else "",
+                    opt_texts[3] if len(opt_texts) > 3 else "",
                     status,
                 )
             else:
@@ -1063,10 +1055,10 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 gr.Textbox(visible=False),
                 gr.Row(visible=False),
                 gr.Button(visible=True),
-                opt_texts[0] if len(opt_texts) > 0 else "*Option A*",
-                opt_texts[1] if len(opt_texts) > 1 else "*Option B*",
-                opt_texts[2] if len(opt_texts) > 2 else "*Option C*",
-                opt_texts[3] if len(opt_texts) > 3 else "*Option D*",
+                opt_texts[0] if len(opt_texts) > 0 else "",
+                opt_texts[1] if len(opt_texts) > 1 else "",
+                opt_texts[2] if len(opt_texts) > 2 else "",
+                opt_texts[3] if len(opt_texts) > 3 else "",
             )
 
         training_components["edit_prompt_btn"].click(

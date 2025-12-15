@@ -49,44 +49,76 @@ def build_training_screen() -> tuple[gr.Tab, dict]:
         gr.Markdown("---")
 
         # ========== Option Cards ==========
-        # Each option shows full text in a scrollable markdown area with a select button
+        # Each option shows full text in a plain textbox with a select button
         gr.Markdown("### Select your preference:")
 
         # Option A
         with gr.Group(elem_classes=["option-group"]):
-            opt_a_text = gr.Markdown("*Option A*", elem_classes=["option-text"])
+            gr.Markdown("**A**", elem_classes=["option-label"])
+            opt_a_text = gr.Textbox(
+                value="", show_label=False, interactive=False,
+                lines=5, max_lines=10, elem_classes=["option-text"]
+            )
             opt_a_btn = gr.Button("Select A", size="sm", variant="primary", elem_classes=["select-btn"])
 
         # Option B
         with gr.Group(elem_classes=["option-group"]):
-            opt_b_text = gr.Markdown("*Option B*", elem_classes=["option-text"])
+            gr.Markdown("**B**", elem_classes=["option-label"])
+            opt_b_text = gr.Textbox(
+                value="", show_label=False, interactive=False,
+                lines=5, max_lines=10, elem_classes=["option-text"]
+            )
             opt_b_btn = gr.Button("Select B", size="sm", variant="primary", elem_classes=["select-btn"])
 
         # Option C
         with gr.Group(elem_classes=["option-group"]):
-            opt_c_text = gr.Markdown("*Option C*", elem_classes=["option-text"])
+            gr.Markdown("**C**", elem_classes=["option-label"])
+            opt_c_text = gr.Textbox(
+                value="", show_label=False, interactive=False,
+                lines=5, max_lines=10, elem_classes=["option-text"]
+            )
             opt_c_btn = gr.Button("Select C", size="sm", variant="primary", elem_classes=["select-btn"])
 
         # Option D
         with gr.Group(elem_classes=["option-group"]):
-            opt_d_text = gr.Markdown("*Option D*", elem_classes=["option-text"])
+            gr.Markdown("**D**", elem_classes=["option-label"])
+            opt_d_text = gr.Textbox(
+                value="", show_label=False, interactive=False,
+                lines=5, max_lines=10, elem_classes=["option-text"]
+            )
             opt_d_btn = gr.Button("Select D", size="sm", variant="primary", elem_classes=["select-btn"])
 
         # Extra options for group_size > 4 (hidden by default)
         with gr.Group(elem_classes=["option-group"], visible=False) as opt_e_group:
-            opt_e_text = gr.Markdown("*Option E*", elem_classes=["option-text"])
+            gr.Markdown("**E**", elem_classes=["option-label"])
+            opt_e_text = gr.Textbox(
+                value="", show_label=False, interactive=False,
+                lines=5, max_lines=10, elem_classes=["option-text"]
+            )
             opt_e_btn = gr.Button("Select E", size="sm", variant="primary", elem_classes=["select-btn"])
 
         with gr.Group(elem_classes=["option-group"], visible=False) as opt_f_group:
-            opt_f_text = gr.Markdown("*Option F*", elem_classes=["option-text"])
+            gr.Markdown("**F**", elem_classes=["option-label"])
+            opt_f_text = gr.Textbox(
+                value="", show_label=False, interactive=False,
+                lines=5, max_lines=10, elem_classes=["option-text"]
+            )
             opt_f_btn = gr.Button("Select F", size="sm", variant="primary", elem_classes=["select-btn"])
 
         with gr.Group(elem_classes=["option-group"], visible=False) as opt_g_group:
-            opt_g_text = gr.Markdown("*Option G*", elem_classes=["option-text"])
+            gr.Markdown("**G**", elem_classes=["option-label"])
+            opt_g_text = gr.Textbox(
+                value="", show_label=False, interactive=False,
+                lines=5, max_lines=10, elem_classes=["option-text"]
+            )
             opt_g_btn = gr.Button("Select G", size="sm", variant="primary", elem_classes=["select-btn"])
 
         with gr.Group(elem_classes=["option-group"], visible=False) as opt_h_group:
-            opt_h_text = gr.Markdown("*Option H*", elem_classes=["option-text"])
+            gr.Markdown("**H**", elem_classes=["option-label"])
+            opt_h_text = gr.Textbox(
+                value="", show_label=False, interactive=False,
+                lines=5, max_lines=10, elem_classes=["option-text"]
+            )
             opt_h_btn = gr.Button("Select H", size="sm", variant="primary", elem_classes=["select-btn"])
 
         gr.Markdown("---")
