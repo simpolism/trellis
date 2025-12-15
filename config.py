@@ -34,6 +34,7 @@ class TrellisConfig:
     max_new_tokens: int = 256
     temperature: float = 1.2
     min_p: float = 0.1
+    sequential_streaming: bool = False  # Generate choices sequentially to reduce VRAM
 
     # Training
     learning_rate: float = 2e-5

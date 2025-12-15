@@ -128,15 +128,38 @@ class UnslothEngine(BaseEngine):
         prompt_len = inputs.shape[1]
 
         with torch.no_grad():
-            sequences = self.model.generate(
-                inputs,
-                max_new_tokens=self.config.max_new_tokens,
-                temperature=self.config.temperature,
-                min_p=self.config.min_p,
-                num_return_sequences=self.config.group_size,
-                do_sample=True,
-                pad_token_id=self.tokenizer.pad_token_id,
-            )
+            if self.config.sequential_streaming:
+                # Sequential generation: generate one sequence at a time
+                # This reduces VRAM usage by only maintaining one KV cache at a time
+                all_sequences = []
+                for _ in range(self.config.group_size):
+                    sequence = self.model.generate(
+                        inputs,
+                        max_new_tokens=self.config.max_new_tokens,
+                        temperature=self.config.temperature,
+                        min_p=self.config.min_p,
+                        num_return_sequences=1,
+                        do_sample=True,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                    )
+                    all_sequences.append(sequence)
+                    # Free GPU memory after each generation
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+                # Concatenate all sequences into a single batch tensor
+                sequences = torch.cat(all_sequences, dim=0)
+            else:
+                # Parallel generation: generate all sequences at once
+                sequences = self.model.generate(
+                    inputs,
+                    max_new_tokens=self.config.max_new_tokens,
+                    temperature=self.config.temperature,
+                    min_p=self.config.min_p,
+                    num_return_sequences=self.config.group_size,
+                    do_sample=True,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                )
 
         # Store for training
         self.current_batch = {

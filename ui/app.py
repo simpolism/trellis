@@ -113,6 +113,7 @@ class TrellisApp:
         context_length: int,
         group_size: int,
         lora_rank: int,
+        sequential_streaming: bool,
     ) -> str:
         """Estimate VRAM requirements."""
         temp_config = TrellisConfig(
@@ -120,6 +121,7 @@ class TrellisApp:
             max_seq_length=int(context_length),
             group_size=int(group_size),
             lora_rank=int(lora_rank),
+            sequential_streaming=sequential_streaming,
         )
         estimate = estimate_vram_unsloth(temp_config)
         return estimate.to_display_string()
@@ -141,6 +143,7 @@ class TrellisApp:
         prompt_prefix: str,
         prompt_suffix: str,
         dataset_id: str,
+        sequential_streaming: bool,
     ):
         """Load model without starting training session. Yields status updates."""
         _log(f"Loading model: {model_name}")
@@ -162,6 +165,7 @@ class TrellisApp:
             system_prompt=system_prompt if system_prompt else None,
             prompt_prefix=prompt_prefix,
             prompt_suffix=prompt_suffix,
+            sequential_streaming=sequential_streaming,
         )
 
         # Initialize engine
@@ -192,6 +196,7 @@ class TrellisApp:
         dataset_subset: str,
         dataset_split: str,
         dataset_column: str,
+        sequential_streaming: bool,
     ):
         """Initialize training session. Yields status updates."""
         _log("Initializing training session...")
@@ -219,6 +224,7 @@ class TrellisApp:
             system_prompt=system_prompt if system_prompt else None,
             prompt_prefix=prompt_prefix,
             prompt_suffix=prompt_suffix,
+            sequential_streaming=sequential_streaming,
         )
 
         # Save config
@@ -640,8 +646,8 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             ],
         )
 
-        def check_vram(model, context, group, rank):
-            return app.check_vram(model, context, group, rank)
+        def check_vram(model, context, group, rank, sequential):
+            return app.check_vram(model, context, group, rank, sequential)
 
         config_components["check_vram_btn"].click(
             check_vram,
@@ -650,6 +656,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 config_components["context_slider"],
                 config_components["group_size"],
                 config_components["lora_rank"],
+                config_components["sequential_streaming"],
             ],
             outputs=[config_components["vram_display"]],
         )
@@ -662,6 +669,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             rank, alpha, max_undos,
             sys_prompt, prefix, suffix,
             dataset_id,
+            sequential,
         ):
             for status in app.load_model_only(
                 model, context, group,
@@ -670,6 +678,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 rank, alpha, max_undos,
                 sys_prompt, prefix, suffix,
                 dataset_id,
+                sequential,
             ):
                 yield status
 
@@ -691,6 +700,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 config_components["prompt_prefix"],
                 config_components["prompt_suffix"],
                 config_components["dataset_input"],
+                config_components["sequential_streaming"],
             ],
             outputs=[config_components["model_status"]],
         )
@@ -709,6 +719,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             rank, alpha, max_undos,
             sys_prompt, prefix, suffix,
             dataset_id, dataset_subset, dataset_split, dataset_column,
+            sequential,
         ):
             """Start training with streaming updates, then generate first prompt."""
             success = False
@@ -719,6 +730,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 rank, alpha, max_undos,
                 sys_prompt, prefix, suffix,
                 dataset_id, dataset_subset, dataset_split, dataset_column,
+                sequential,
             ):
                 success = status == "Ready!"
                 yield (status, gr.skip())  # Don't change tab until ready
@@ -770,6 +782,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 config_components["dataset_subset"],
                 config_components["dataset_split"],
                 config_components["dataset_column"],
+                config_components["sequential_streaming"],
             ],
             outputs=[
                 config_components["go_status"],

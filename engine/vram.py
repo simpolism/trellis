@@ -112,7 +112,9 @@ def estimate_vram_unsloth(config: "TrellisConfig") -> VRAMEstimate:
     # =========================================================================
     # 2 (K and V) * num_layers * 2 * head_dim * num_heads * seq_len * batch_size
     # Simplified: 2 * layers * hidden_dim * seq_len * batch_size * 2 (fp16)
-    batch_size = config.group_size
+    # When sequential_streaming is enabled, we only generate one sequence at a time,
+    # so batch_size = 1 instead of group_size
+    batch_size = 1 if config.sequential_streaming else config.group_size
     # During generation, KV cache grows with each token
     # Estimate for full context length
     kv_cache_bytes = 2 * num_layers * hidden_dim * config.max_seq_length * batch_size * 2

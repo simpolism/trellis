@@ -162,6 +162,11 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     label="Max New Tokens",
                     info="Maximum length of generated responses",
                 )
+            sequential_streaming = gr.Checkbox(
+                label="Sequential Streaming Mode",
+                value=False,
+                info="Generate choices one at a time to reduce VRAM usage during inference (slower but more memory-efficient)",
+            )
 
             # Engine-specific settings (training)
             gr.Markdown("#### Training Settings")
@@ -292,6 +297,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         "kl_beta": kl_beta,
         "temperature": temperature,
         "max_new_tokens": max_new_tokens,
+        "sequential_streaming": sequential_streaming,
         # LoRA (now in engine section)
         "lora_rank": lora_rank,
         "lora_alpha": lora_alpha,
