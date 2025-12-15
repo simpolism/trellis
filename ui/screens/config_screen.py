@@ -88,20 +88,20 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         with gr.Group():
             gr.Markdown("### Model")
             gr.Markdown(
-                "*Select the base model to train. The model will be loaded in 4-bit "
-                "quantization with LoRA adapters for efficient training.*"
+                "*Select the base model to train. The model can be loaded in 4-bit "
+                "or 16-bit precision with LoRA adapters for efficient training.*"
             )
             model_input = gr.Textbox(
                 label="Model Name",
-                value="unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
+                value="PleIAs/Baguettotron",
                 placeholder="HuggingFace model ID or local path",
-                info="HuggingFace model ID (e.g., 'unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit') or local folder path",
+                info="HuggingFace model ID (e.g., 'PleIAs/Baguettotron') or local folder path",
             )
             with gr.Row():
                 context_slider = gr.Slider(
                     minimum=512,
                     maximum=8192,
-                    value=2048,
+                    value=4096,
                     step=256,
                     label="Context Length",
                     scale=2,
@@ -118,11 +118,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                 )
 
             with gr.Row():
-                check_vram_btn = gr.Button("Check VRAM", variant="secondary", scale=1)
-                load_model_btn = gr.Button("Load Model", variant="secondary", scale=1)
-
-            vram_display = gr.Markdown("*Click 'Check VRAM' to estimate memory requirements*")
-            model_status = gr.Markdown("")
+                pass
 
         gr.Markdown("---")
 
@@ -131,13 +127,20 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
             gr.Markdown("### Training Engine")
             gr.Markdown(
                 "*The training backend handles model loading and gradient updates. "
-                "UnSloth provides optimized 4-bit quantization with LoRA.*"
+                "UnSloth provides optimized loading plus LoRA adapters.*"
             )
             engine_dropdown = gr.Dropdown(
-                choices=["UnSloth (4-bit + LoRA)"],
-                value="UnSloth (4-bit + LoRA)",
+                choices=["UnSloth (LoRA)"],
+                value="UnSloth (LoRA)",
                 label="Engine",
                 interactive=True,
+            )
+
+            precision = gr.Radio(
+                choices=["16-bit (recommended for Baguettotron)", "4-bit (VRAM saver)"],
+                value="16-bit (recommended for Baguettotron)",
+                label="Precision",
+                info="16-bit trains best; switch to 4-bit if VRAM is tight.",
             )
 
             # Engine-specific settings (generation)
@@ -153,11 +156,11 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                 )
                 max_new_tokens = gr.Slider(
                     minimum=64,
-                    maximum=1024,
+                    maximum=4096,
                     value=256,
                     step=64,
                     label="Max New Tokens",
-                    info="Maximum length of generated responses",
+                    info="Maximum length of generated responses (up to 4096)",
                 )
 
             # Engine-specific settings (training)
@@ -201,6 +204,13 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     scale=1,
                     info="Scaling factor. Usually set equal to rank",
                 )
+
+            with gr.Row():
+                check_vram_btn = gr.Button("Check VRAM", variant="secondary", scale=1)
+                load_model_btn = gr.Button("Load Model", variant="secondary", scale=1)
+
+            vram_display = gr.Markdown("*Pick precision, then click 'Check VRAM' to estimate memory requirements.*")
+            model_status = gr.Markdown("")
 
         gr.Markdown("---")
 
@@ -247,6 +257,12 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     placeholder="Added after each prompt",
                     scale=1,
                 )
+            append_think_tag = gr.Checkbox(
+                label="Append <think> to assistant prompt",
+                value=True,
+                info="Enable to automatically prepend <think> so responses start with a reasoning tag.",
+                interactive=True,
+            )
 
         gr.Markdown("---")
 
@@ -283,6 +299,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         "model_status": model_status,
         # Engine
         "engine_dropdown": engine_dropdown,
+        "precision": precision,
         # Training (now in engine section)
         "learning_rate": learning_rate,
         "kl_beta": kl_beta,
@@ -297,6 +314,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         "system_prompt": system_prompt,
         "prompt_prefix": prompt_prefix,
         "prompt_suffix": prompt_suffix,
+        "append_think_tag": append_think_tag,
         # Go
         "go_btn": go_btn,
         "go_status": go_status,

@@ -29,13 +29,14 @@ class VRAMEstimate:
     total_gb: float
     fits_in_vram: bool
     available_vram_gb: float
+    precision: str = "4-bit"
 
     def to_display_string(self) -> str:
         """Format for UI display."""
         status = "OK" if self.fits_in_vram else "WARNING: May not fit!"
         lines = [
-            f"**VRAM Estimate:** {self.total_gb:.1f} GB",
-            f"- Base model (4-bit): {self.base_model_gb:.1f} GB",
+            f"**VRAM Estimate ({self.precision}):** {self.total_gb:.1f} GB",
+            f"- Base model: {self.base_model_gb:.1f} GB",
             f"- LoRA parameters: {self.lora_params_gb:.2f} GB",
             f"- KV cache: {self.kv_cache_gb:.2f} GB",
             f"- Optimizer states: {self.optimizer_gb:.2f} GB",

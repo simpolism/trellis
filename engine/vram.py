@@ -2,7 +2,7 @@
 VRAM Estimation
 ===============
 
-Estimates VRAM requirements for UnSloth 4-bit quantized models with LoRA.
+Estimates VRAM requirements for UnSloth models (4-bit or 16-bit) with LoRA.
 """
 
 from __future__ import annotations
@@ -27,6 +27,19 @@ MODEL_ARCHITECTURES = {
     "70b": (70.0, 8192, 80, 64, 28672),
 }
 
+# Hand-tuned overrides for models we ship defaults for
+KNOWN_MODEL_SPECS = {
+    # Based on public description: 321M params, 80 layers, Qwen/Llama-like depth
+    "pleias/baguettotron": {
+        "params_billions": 0.321,
+        "num_layers": 80,
+        # Overestimate hidden size to stay conservative (actual spec not public)
+        "hidden_dim": 1024,
+        "intermediate_dim": 4096,
+        "mlp_ratio": 4,
+    },
+}
+
 
 def _parse_model_size(model_name: str) -> float:
     """Extract parameter count from model name."""
@@ -39,6 +52,55 @@ def _parse_model_size(model_name: str) -> float:
 
     # Default to 8B if can't parse
     return 8.0
+
+
+def _try_autoconfig(model_name: str):
+    """Try to pull architecture hints from AutoConfig without failing hard."""
+    try:
+        from transformers import AutoConfig  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        cfg = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    except Exception:
+        return None
+
+    hidden = getattr(cfg, "hidden_size", None) or getattr(cfg, "d_model", None)
+    num_layers = getattr(cfg, "num_hidden_layers", None) or getattr(cfg, "n_layers", None)
+    intermediate = getattr(cfg, "intermediate_size", None) or getattr(cfg, "ffn_dim", None)
+    mlp_ratio = getattr(cfg, "mlp_ratio", None)
+    params_b = getattr(cfg, "model_size_in_billions", None) or getattr(cfg, "num_parameters", None)
+    if isinstance(params_b, int):
+        params_b = params_b / 1e9
+
+    return {
+        "hidden_dim": hidden,
+        "num_layers": num_layers,
+        "intermediate_dim": intermediate,
+        "params_billions": params_b,
+        "mlp_ratio": mlp_ratio,
+    }
+
+
+def _get_model_spec(model_name: str):
+    """Get hidden dim, layers, intermediate, and param count hints."""
+    lower_name = model_name.lower()
+    if lower_name in KNOWN_MODEL_SPECS:
+        return KNOWN_MODEL_SPECS[lower_name]
+
+    auto_spec = _try_autoconfig(model_name)
+    if auto_spec:
+        return auto_spec
+
+    params_billions = _parse_model_size(model_name)
+    hidden_dim, num_layers, intermediate_dim = _get_architecture(params_billions)
+    return {
+        "params_billions": params_billions,
+        "hidden_dim": hidden_dim,
+        "num_layers": num_layers,
+        "intermediate_dim": intermediate_dim,
+    }
 
 
 def _get_architecture(params_billions: float) -> tuple[int, int, int]:
@@ -67,9 +129,20 @@ def estimate_vram_unsloth(config: "TrellisConfig") -> VRAMEstimate:
     """
     import torch
 
-    # Parse model size
-    params_billions = _parse_model_size(config.model_name)
-    hidden_dim, num_layers, intermediate_dim = _get_architecture(params_billions)
+    # Parse model size and shape hints
+    spec = _get_model_spec(config.model_name)
+    params_billions = spec.get("params_billions") or _parse_model_size(config.model_name)
+    hidden_dim = spec.get("hidden_dim") or _get_architecture(params_billions)[0]
+    num_layers = spec.get("num_layers") or _get_architecture(params_billions)[1]
+    intermediate_dim = spec.get("intermediate_dim")
+    if intermediate_dim is None and spec.get("mlp_ratio") and hidden_dim:
+        intermediate_dim = hidden_dim * spec["mlp_ratio"]
+    intermediate_dim = intermediate_dim or _get_architecture(params_billions)[2]
+
+    # Defensive casts
+    hidden_dim = int(hidden_dim)
+    num_layers = int(num_layers)
+    intermediate_dim = int(intermediate_dim)
 
     # Number of target modules per layer
     # Default targets: q, k, v, o, gate, up, down = 7 modules
@@ -83,7 +156,13 @@ def estimate_vram_unsloth(config: "TrellisConfig") -> VRAMEstimate:
     # - Quantization scales and zeros
     # - Dequantization buffers during inference
     # Realistic multiplier: ~0.7 bytes per param
-    base_model_bytes = params_billions * 1e9 * 0.70
+    if config.load_in_4bit:
+        base_model_bytes = params_billions * 1e9 * 0.70
+        precision_label = "4-bit"
+    else:
+        # fp16/bf16 weights + modest overhead
+        base_model_bytes = params_billions * 1e9 * 2.2
+        precision_label = "16-bit"
     base_model_gb = base_model_bytes / (1024 ** 3)
 
     # =========================================================================
@@ -130,12 +209,14 @@ def estimate_vram_unsloth(config: "TrellisConfig") -> VRAMEstimate:
     # Activations (during training forward/backward)
     # =========================================================================
     # Activations scale with: batch_size * seq_len * hidden_dim * num_layers
-    # Need to store for backward pass
-    # With gradient checkpointing (used by UnSloth), this is reduced
-    # but still significant
-    # Rough estimate: hidden_dim * seq_len * batch * layers * 4 bytes (fp32 grads)
-    # Divided by ~4 for gradient checkpointing
-    activations_bytes = hidden_dim * config.max_seq_length * batch_size * num_layers * 4 / 4
+    # Training uses full sequences (prompt + generated). Use a pessimistic estimate
+    # based on half the context or prompt+max_new_tokens, whichever is larger.
+    train_seq_len = min(
+        config.max_seq_length,
+        max(config.max_new_tokens + 512, config.max_seq_length // 2),
+    )
+    # Rough estimate with gradient checkpointing and backward buffers (conservative)
+    activations_bytes = hidden_dim * train_seq_len * batch_size * num_layers * 4 * 2.5
     activations_gb = activations_bytes / (1024 ** 3)
 
     # =========================================================================
@@ -161,12 +242,20 @@ def estimate_vram_unsloth(config: "TrellisConfig") -> VRAMEstimate:
     available_gb = 0.0
     if torch.cuda.is_available():
         try:
-            available_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            free_mem, total_mem = torch.cuda.mem_get_info()
+            available_gb = free_mem / (1024 ** 3)
+            total_device_gb = total_mem / (1024 ** 3)
         except Exception:
-            pass
+            try:
+                total_device_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                available_gb = total_device_gb
+            except Exception:
+                total_device_gb = 0.0
+    else:
+        total_device_gb = 0.0
 
-    # Add safety margin (10%) for estimation uncertainty
-    fits = total_gb * 1.10 < available_gb if available_gb > 0 else False
+    # Add conservative safety margin (30%) for estimation uncertainty/fragmentation
+    fits = total_gb * 1.30 < available_gb if available_gb > 0 else False
 
     return VRAMEstimate(
         base_model_gb=base_model_gb,
@@ -176,5 +265,6 @@ def estimate_vram_unsloth(config: "TrellisConfig") -> VRAMEstimate:
         activations_gb=activations_gb + cuda_overhead_gb,  # Combine for display
         total_gb=total_gb,
         fits_in_vram=fits,
-        available_vram_gb=available_gb,
+        available_vram_gb=available_gb if available_gb > 0 else total_device_gb,
+        precision=precision_label,
     )

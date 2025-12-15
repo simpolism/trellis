@@ -114,13 +114,16 @@ class TrellisApp:
         context_length: int,
         group_size: int,
         lora_rank: int,
+        precision_choice: str,
     ) -> str:
         """Estimate VRAM requirements."""
+        load_in_4bit = "4-bit" in (precision_choice or "").lower()
         temp_config = TrellisConfig(
             model_name=model_name,
             max_seq_length=int(context_length),
             group_size=int(group_size),
             lora_rank=int(lora_rank),
+            load_in_4bit=load_in_4bit,
         )
         estimate = estimate_vram_unsloth(temp_config)
         return estimate.to_display_string()
@@ -142,10 +145,14 @@ class TrellisApp:
         prompt_prefix: str,
         prompt_suffix: str,
         dataset_id: str,
+        precision_choice: str,
+        append_think_tag: bool,
     ):
         """Load model without starting training session. Yields status updates."""
         _log(f"Loading model: {model_name}")
         yield "Loading model (this may take a minute)..."
+
+        load_in_4bit = "4-bit" in (precision_choice or "").lower()
 
         # Build config
         self.config = TrellisConfig(
@@ -163,6 +170,8 @@ class TrellisApp:
             system_prompt=system_prompt if system_prompt else None,
             prompt_prefix=prompt_prefix,
             prompt_suffix=prompt_suffix,
+            load_in_4bit=load_in_4bit,
+            append_think_tag=append_think_tag,
         )
 
         # Initialize engine
@@ -193,10 +202,14 @@ class TrellisApp:
         dataset_subset: str,
         dataset_split: str,
         dataset_column: str,
+        precision_choice: str,
+        append_think_tag: bool,
     ):
         """Initialize training session. Yields status updates."""
         _log("Initializing training session...")
         yield "Initializing session..."
+
+        load_in_4bit = "4-bit" in (precision_choice or "").lower()
 
         # Create session directory
         session_name = SessionState.generate_session_name()
@@ -220,6 +233,8 @@ class TrellisApp:
             system_prompt=system_prompt if system_prompt else None,
             prompt_prefix=prompt_prefix,
             prompt_suffix=prompt_suffix,
+            load_in_4bit=load_in_4bit,
+            append_think_tag=append_think_tag,
         )
 
         # Save config
@@ -313,7 +328,7 @@ class TrellisApp:
 
         # Load session state and config
         self.session_state, self.config = load_session(session_path)
-        engine_name = self.session_state.engine_name or "UnSloth (4-bit + LoRA)"
+        engine_name = self.session_state.engine_name or "UnSloth (LoRA)"
 
         _log("Restoring undo stack...")
         yield "Restoring undo stack..."
@@ -454,6 +469,15 @@ class TrellisApp:
                 self.prompt_source.index,
             )
             self.session_state.save(self.session_dir / "session.json")
+
+        # Free previous batch to reclaim GPU memory between steps
+        self.engine.current_batch = None
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
         return status, {"step": self.step_count, "drift": drift, **metrics}
 
@@ -636,8 +660,8 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             ],
         )
 
-        def check_vram(model, context, group, rank):
-            return app.check_vram(model, context, group, rank)
+        def check_vram(model, context, group, rank, precision_choice):
+            return app.check_vram(model, context, group, rank, precision_choice)
 
         config_components["check_vram_btn"].click(
             check_vram,
@@ -646,6 +670,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 config_components["context_slider"],
                 config_components["group_size"],
                 config_components["lora_rank"],
+                config_components["precision"],
             ],
             outputs=[config_components["vram_display"]],
         )
@@ -657,7 +682,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             lr, kl, temp, tokens,
             rank, alpha, max_undos,
             sys_prompt, prefix, suffix,
-            dataset_id,
+            dataset_id, precision_choice, append_think_tag,
         ):
             for status in app.load_model_only(
                 model, context, group,
@@ -665,7 +690,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 lr, kl, temp, tokens,
                 rank, alpha, max_undos,
                 sys_prompt, prefix, suffix,
-                dataset_id,
+                dataset_id, precision_choice, append_think_tag,
             ):
                 yield status
 
@@ -687,6 +712,8 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 config_components["prompt_prefix"],
                 config_components["prompt_suffix"],
                 config_components["dataset_input"],
+                config_components["precision"],
+                config_components["append_think_tag"],
             ],
             outputs=[config_components["model_status"]],
         )
@@ -738,6 +765,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             rank, alpha, max_undos,
             sys_prompt, prefix, suffix,
             dataset_id, dataset_subset, dataset_split, dataset_column,
+            precision_choice, append_think_tag,
         ):
             """Start training with streaming updates, then generate first prompt."""
             success = False
@@ -748,6 +776,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 rank, alpha, max_undos,
                 sys_prompt, prefix, suffix,
                 dataset_id, dataset_subset, dataset_split, dataset_column,
+                precision_choice, append_think_tag,
             ):
                 success = status == "Ready!"
                 yield (status, gr.skip())  # Don't change tab until ready
@@ -870,6 +899,8 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 config_components["dataset_subset"],
                 config_components["dataset_split"],
                 config_components["dataset_column"],
+                config_components["precision"],
+                config_components["append_think_tag"],
             ],
             outputs=[
                 config_components["go_status"],

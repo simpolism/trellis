@@ -2,7 +2,7 @@
 UnSloth Engine
 ==============
 
-Training engine using UnSloth for 4-bit quantized models with LoRA.
+Training engine using UnSloth for 4-bit or 16-bit models with LoRA.
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ class UnslothEngine(BaseEngine):
 
     @property
     def name(self) -> str:
-        return "UnSloth (4-bit + LoRA)"
+        return "UnSloth (LoRA)"
 
     @property
     def is_loaded(self) -> bool:
@@ -128,11 +128,15 @@ class UnslothEngine(BaseEngine):
 
         print("Loading model...")
 
+        dtype = None
+        if not self.config.load_in_4bit:
+            dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+
         self.model, self.tokenizer = FastLanguageModel.from_pretrained(
             model_name=self.config.model_name,
             max_seq_length=self.config.max_seq_length,
-            dtype=None,
-            load_in_4bit=True,
+            dtype=dtype,
+            load_in_4bit=self.config.load_in_4bit,
         )
 
         self.model = FastLanguageModel.get_peft_model(
@@ -169,6 +173,21 @@ class UnslothEngine(BaseEngine):
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+    def _ensure_chat_template(self):
+        """Provide a default Qwen-style chat template if missing."""
+        if getattr(self.tokenizer, "chat_template", None):
+            return
+        self.tokenizer.chat_template = (
+            "{% for message in messages %}"
+            "{% if message['role'] == 'user' %}"
+            "<|im_start|>user\n{{ message['content'] }}<|im_end|>\n"
+            "{% elif message['role'] == 'assistant' %}"
+            "<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n"
+            "{% endif %}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
+        )
+
     def _format_prompt(self, prompt: str) -> str:
         """Apply system prompt and prefix/suffix if configured."""
         # Apply prefix and suffix
@@ -179,17 +198,11 @@ class UnslothEngine(BaseEngine):
             formatted = formatted + self.config.prompt_suffix
         return formatted
 
-    def generate_options(self, prompt: str) -> list[str]:
-        """Generate GROUP_SIZE continuations for the given prompt."""
-        if self.model is None:
-            raise RuntimeError("Model not loaded")
-
-        self.model.eval()
-
-        # Format prompt with prefix/suffix
+    def _build_inputs(self, prompt: str) -> tuple[torch.Tensor, int, str]:
+        """Construct input ids with optional think tag and return prompt length."""
+        self._ensure_chat_template()
         formatted_prompt = self._format_prompt(prompt)
 
-        # Build messages
         messages = []
         if self.config.system_prompt:
             messages.append({"role": "system", "content": self.config.system_prompt})
@@ -202,7 +215,26 @@ class UnslothEngine(BaseEngine):
             return_tensors="pt",
         ).to(self.device)
 
+        if self.config.append_think_tag and self.config.think_tag:
+            think_tokens = self.tokenizer.encode(
+                self.config.think_tag,
+                add_special_tokens=False,
+            )
+            if think_tokens:
+                think_tensor = torch.tensor([think_tokens], device=self.device)
+                inputs = torch.cat([inputs, think_tensor], dim=1)
+
         prompt_len = inputs.shape[1]
+        return inputs, prompt_len, formatted_prompt
+
+    def generate_options(self, prompt: str) -> list[str]:
+        """Generate GROUP_SIZE continuations for the given prompt."""
+        if self.model is None:
+            raise RuntimeError("Model not loaded")
+
+        self.model.eval()
+
+        inputs, prompt_len, _ = self._build_inputs(prompt)
 
         with torch.no_grad():
             sequences = self.model.generate(
@@ -235,21 +267,7 @@ class UnslothEngine(BaseEngine):
 
         self.model.eval()
 
-        formatted_prompt = self._format_prompt(prompt)
-
-        messages = []
-        if self.config.system_prompt:
-            messages.append({"role": "system", "content": self.config.system_prompt})
-        messages.append({"role": "user", "content": formatted_prompt})
-
-        inputs = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_tensors="pt",
-        ).to(self.device)
-
-        prompt_len = inputs.shape[1]
+        inputs, prompt_len, _ = self._build_inputs(prompt)
 
         stop_ids: set[int] = set()
         for tok_id in (self.tokenizer.eos_token_id, self.tokenizer.pad_token_id):
@@ -327,6 +345,15 @@ class UnslothEngine(BaseEngine):
         prompt_len = self.current_batch["prompt_len"]
         input_ids = self.current_batch["sequences"].to(self.device)
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
+
+        # Trim to the maximum non-padding length to avoid wasted compute/memory
+        lengths = attention_mask.sum(dim=1)
+        max_len = int(lengths.max().item())
+        max_len = max(max_len, prompt_len + 1)
+        max_len = min(max_len, input_ids.shape[1])
+        input_ids = input_ids[:, :max_len]
+        attention_mask = attention_mask[:, :max_len]
+        prompt_len = min(prompt_len, max_len)
 
         advantages = self._compute_advantages(choice_idx)
 

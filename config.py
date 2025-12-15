@@ -17,8 +17,11 @@ class TrellisConfig:
     """All tunable parameters in one place."""
 
     # Model
-    model_name: str = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
-    max_seq_length: int = 2048
+    model_name: str = "PleIAs/Baguettotron"
+    max_seq_length: int = 4096
+    load_in_4bit: bool = False
+    append_think_tag: bool = True
+    think_tag: str = "<think>"
 
     # LoRA
     lora_rank: int = 16

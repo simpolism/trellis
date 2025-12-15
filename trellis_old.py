@@ -19,7 +19,6 @@ Hardware target: RTX 4070 Ti Super (16 GB) with 4-bit base + LoRA.
 
 Usage:
     python trellis.py                    # Launch Gradio UI
-    python trellis.py --dry-run          # UI without GPU (for testing)
 """
 
 from __future__ import annotations
@@ -663,10 +662,10 @@ class TrellisEngine:
     Separated from state management for clarity.
     """
     
-    def __init__(self, config: TrellisConfig, dry_run: bool = False):
+    def __init__(self, config: TrellisConfig, cpu_only: bool = False):
         self.config = config
-        self.dry_run = dry_run
-        self.device = "cuda" if torch.cuda.is_available() and not dry_run else "cpu"
+        self.cpu_only = cpu_only
+        self.device = "cuda" if torch.cuda.is_available() and not cpu_only else "cpu"
         
         self.model = None
         self.tokenizer = None
@@ -677,8 +676,8 @@ class TrellisEngine:
     
     def load_model(self) -> str:
         """Initialize model, tokenizer, LoRA, optimizer."""
-        if self.dry_run:
-            return "🧪 Dry-run mode (no GPU)"
+        if self.cpu_only:
+            return "🧪 CPU-only preview (no model load)"
         
         from unsloth import FastLanguageModel
         from peft.utils import get_peft_model_state_dict
@@ -728,9 +727,9 @@ class TrellisEngine:
     
     def generate_options(self, prompt: str) -> list[str]:
         """Generate GROUP_SIZE continuations for the given prompt."""
-        if self.dry_run:
-            print(f"  [dry-run] Generating {self.config.group_size} options...")
-            return [f"[Dry-run response {i+1} to: {prompt[:50]}...]"
+        if self.cpu_only:
+            print(f"  [cpu-only] Generating {self.config.group_size} placeholder options...")
+            return [f"[CPU-only response {i+1} to: {prompt[:50]}...]"
                     for i in range(self.config.group_size)]
 
         if self.model is None:
@@ -790,9 +789,9 @@ class TrellisEngine:
         choice_label = f"Option {chr(65 + choice_idx)}" if choice_idx < self.config.group_size else "Reject All"
         print(f"  💪 Training on choice: {choice_label}")
 
-        if self.dry_run:
-            print(f"  [dry-run] Would update weights here")
-            return "🧪 Dry-run: would train here", {"pg_loss": 0.0, "kl_loss": 0.0}
+        if self.cpu_only:
+            print(f"  [cpu-only] Would update weights here")
+            return "🧪 CPU-only: would train here", {"pg_loss": 0.0, "kl_loss": 0.0}
 
         if self.model is None or self.optimizer is None:
             raise RuntimeError("Model not loaded")
@@ -900,7 +899,7 @@ class TrellisEngine:
     
     def compute_drift(self) -> float:
         """L2 distance of LoRA weights from zero (i.e., from base model)."""
-        if self.dry_run or self.model is None:
+        if self.cpu_only or self.model is None:
             return 0.0
         
         total = 0.0
@@ -911,7 +910,7 @@ class TrellisEngine:
     
     def get_adapter_state(self) -> dict:
         """Snapshot adapter weights (CPU)."""
-        if self.dry_run:
+        if self.cpu_only:
             return {"dummy": torch.zeros(1)}
         
         from peft.utils import get_peft_model_state_dict
@@ -920,7 +919,7 @@ class TrellisEngine:
     
     def get_optimizer_state(self) -> dict:
         """Snapshot optimizer state (CPU)."""
-        if self.dry_run:
+        if self.cpu_only:
             return {}
         
         state = self.optimizer.state_dict()
@@ -937,7 +936,7 @@ class TrellisEngine:
     
     def restore_state(self, adapter_state: dict, optimizer_state: dict):
         """Restore adapter and optimizer from snapshots."""
-        if self.dry_run:
+        if self.cpu_only:
             return
         
         from peft.utils import set_peft_model_state_dict
@@ -957,7 +956,7 @@ class TrellisEngine:
     
     def save_adapter(self, path: str):
         """Save current adapter to disk."""
-        if self.dry_run:
+        if self.cpu_only:
             return
         os.makedirs(path, exist_ok=True)
         self.model.save_pretrained(path)
@@ -970,9 +969,9 @@ class TrellisEngine:
 class TrellisApp:
     """Wires together the engine, state tree, and Gradio UI."""
     
-    def __init__(self, config: TrellisConfig, dry_run: bool = False):
+    def __init__(self, config: TrellisConfig, cpu_only: bool = False):
         self.config = config
-        self.engine = TrellisEngine(config, dry_run=dry_run)
+        self.engine = TrellisEngine(config, cpu_only=cpu_only)
         self.tree = StateTree(config.save_dir)
         self.journal = Journal(Path(config.save_dir))
         self.prompt_source = PromptSource()
@@ -1000,7 +999,7 @@ class TrellisApp:
     
     def generate(self, prompt: str) -> tuple[str, str, str, str, str]:
         """Generate options and return them for display."""
-        if self.engine.model is None and not self.engine.dry_run:
+        if self.engine.model is None and not self.engine.cpu_only:
             blank = "⚠️ Load the model first."
             return blank, blank, blank, blank, ""
         
@@ -1826,7 +1825,6 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
 
 def main():
     parser = argparse.ArgumentParser(description="Trellis: Interactive Preference Steering")
-    parser.add_argument("--dry-run", action="store_true", help="Run UI without GPU")
     parser.add_argument("--config", type=str, help="Path to config JSON")
     args = parser.parse_args()
     
@@ -1835,7 +1833,7 @@ def main():
     else:
         config = TrellisConfig()
     
-    app = TrellisApp(config, dry_run=args.dry_run)
+    app = TrellisApp(config)
     demo = build_ui(app)
     demo.launch()
 
