@@ -81,6 +81,14 @@ class BaseEngine(ABC):
         """
         ...
 
+    def generate_options_streaming(self, prompt: str):
+        """
+        Stream GROUP_SIZE continuations for the given prompt.
+
+        Default implementation falls back to a single synchronous yield.
+        """
+        yield self.generate_options(prompt)
+
     @abstractmethod
     def train_step(self, choice_idx: int) -> tuple[str, dict]:
         """

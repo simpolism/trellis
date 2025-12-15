@@ -286,6 +286,19 @@ span.info {
     transition: none !important;
 }
 
+/* Prompt flash cue when prompt changes */
+@keyframes prompt-flash {
+    0% { background-color: #fff0b3; }
+    30% { background-color: #fff7d6; }
+    70% { background-color: #fffdf0; }
+    100% { background-color: var(--white); }
+}
+
+.prompt-card.flash,
+.prompt-card .prompt-flash {
+    animation: prompt-flash 2s ease-out forwards;
+}
+
 /* ========== Option Groups ========== */
 .option-group {
     border: 1px solid var(--black) !important;

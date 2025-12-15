@@ -11,6 +11,8 @@
 - Install deps (CUDA toolchain required for Torch/Unsloth pins): `uv pip install -r requirements.txt`
 - Launch full app: `python trellis.py`; smoke-test without GPU: `python trellis.py --dry-run`
 - Isolate artifacts while testing: `python trellis.py --save-dir /tmp/trellis_sessions`
+- Use the repo virtualenv for Python (`source .venv/bin/activate`); system `python` is not available
+- AGENTS.md and CLAUDE.md are hard-linked; edits to one update the other
 
 ## Coding Style & Naming Conventions
 - Follow PEP 8 with 4-space indents and type hints; keep functions small and side-effect-light.

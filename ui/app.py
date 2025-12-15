@@ -696,6 +696,42 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             # Just return the raw text - labels are shown separately
             return [opt for opt in options[:8]]
 
+        # Selection controls (enable/disable during generation)
+        selection_controls = [
+            training_components["opt_a_btn"],
+            training_components["opt_b_btn"],
+            training_components["opt_c_btn"],
+            training_components["opt_d_btn"],
+            training_components["none_btn"],
+            training_components["skip_btn"],
+            training_components["undo_btn"],
+        ]
+
+        def selection_updates(enabled: bool):
+            """Enable/disable selection controls."""
+            return [gr.update(interactive=enabled) for _ in selection_controls]
+
+        def prompt_update(value: str, flash: bool = False):
+            content = value
+            if flash:
+                # Wrap in a flashing container so animation is visible
+                content = f"<div class='prompt-flash'>{value}</div>"
+            return gr.update(value=content)
+
+        # Full outputs including stats, options, undo status, and button states
+        full_outputs = [
+            training_components["step_display"],
+            training_components["drift_display"],
+            training_components["dataset_info"],
+            training_components["prompt_display"],
+            training_components["opt_a_text"],
+            training_components["opt_b_text"],
+            training_components["opt_c_text"],
+            training_components["opt_d_text"],
+            training_components["undo_status"],
+            *selection_controls,
+        ]
+
         def start_training_flow(
             model, context, group, engine,
             lr, kl, temp, tokens,
@@ -725,8 +761,10 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             if not app.model_loaded:
                 yield (
                     "**Step:** 0", "**Drift:** 0.000", "**Dataset:** Not loaded",
-                    "*Model not loaded*",
+                    prompt_update("*Model not loaded*"),
                     "", "", "", "",
+                    "",
+                    *selection_updates(False),
                 )
                 return
 
@@ -740,29 +778,75 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             # Yield prompt immediately with generating placeholders
             yield (
                 stats[0], stats[1], stats[2],
-                f"**Prompt:**\n\n{app.current_prompt}",
+                prompt_update(f"**Prompt:**\n\n{app.current_prompt}", flash=True),
                 "Generating...",
                 "Generating...",
                 "Generating...",
                 "Generating...",
+                "Generating... please wait",
+                *selection_updates(False),
             )
 
-            # Generate options (slow - model inference)
-            app.current_options = app.engine.generate_options(app.current_prompt)
+            prompt_display = f"**Prompt:**\n\n{app.current_prompt}"
+            final_options: list[str] = []
+            streamed = False
 
+            # Stream options as they generate
+            if hasattr(app.engine, "generate_options_streaming"):
+                try:
+                    for options in app.engine.generate_options_streaming(app.current_prompt):
+                        streamed = True
+                        opt_texts = format_options_for_display(options)
+                        final_options = opt_texts
+                        yield (
+                            stats[0], stats[1], stats[2],
+                            gr.skip(),
+                            opt_texts[0] if len(opt_texts) > 0 else "",
+                            opt_texts[1] if len(opt_texts) > 1 else "",
+                            opt_texts[2] if len(opt_texts) > 2 else "",
+                            opt_texts[3] if len(opt_texts) > 3 else "",
+                            "Generating... please wait",
+                            *selection_updates(False),
+                        )
+                except Exception:
+                    streamed = False
+
+            if not streamed or not final_options:
+                # Fallback to blocking generation
+                app.current_options = app.engine.generate_options(app.current_prompt)
+                if app.journal:
+                    app.journal.log_generation(app.current_prompt, len(app.current_options))
+
+                opt_texts = format_options_for_display(app.current_options)
+
+                yield (
+                    stats[0], stats[1], stats[2],
+                    prompt_update(prompt_display),
+                    opt_texts[0] if len(opt_texts) > 0 else "",
+                    opt_texts[1] if len(opt_texts) > 1 else "",
+                    opt_texts[2] if len(opt_texts) > 2 else "",
+                    opt_texts[3] if len(opt_texts) > 3 else "",
+                    "",
+                    *selection_updates(True),
+                )
+                return
+
+            # Store and log final streamed options
+            app.current_options = final_options
             if app.journal:
                 app.journal.log_generation(app.current_prompt, len(app.current_options))
 
+            # Final enable after streaming completes
             opt_texts = format_options_for_display(app.current_options)
-
-            # Yield final result with actual options
             yield (
                 stats[0], stats[1], stats[2],
-                f"**Prompt:**\n\n{app.current_prompt}",
+                prompt_update(prompt_display),
                 opt_texts[0] if len(opt_texts) > 0 else "",
                 opt_texts[1] if len(opt_texts) > 1 else "",
                 opt_texts[2] if len(opt_texts) > 2 else "",
                 opt_texts[3] if len(opt_texts) > 3 else "",
+                "",
+                *selection_updates(True),
             )
 
         config_components["go_btn"].click(
@@ -794,16 +878,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         ).then(
             # After tab switch, generate first prompt
             generate_first_prompt,
-            outputs=[
-                training_components["step_display"],
-                training_components["drift_display"],
-                training_components["dataset_info"],
-                training_components["prompt_display"],
-                training_components["opt_a_text"],
-                training_components["opt_b_text"],
-                training_components["opt_c_text"],
-                training_components["opt_d_text"],
-            ],
+            outputs=full_outputs,
         )
 
         # Resume session handler
@@ -845,52 +920,22 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
         ).then(
             # After tab switch, generate first prompt
             generate_first_prompt,
-            outputs=[
-                training_components["step_display"],
-                training_components["drift_display"],
-                training_components["dataset_info"],
-                training_components["prompt_display"],
-                training_components["opt_a_text"],
-                training_components["opt_b_text"],
-                training_components["opt_c_text"],
-                training_components["opt_d_text"],
-            ],
+            outputs=full_outputs,
         )
 
         # =====================================================================
         # Screen 2 Event Handlers
         # =====================================================================
 
-        # Option outputs only - stats/prompt stay visible
-        option_outputs = [
-            training_components["opt_a_text"],
-            training_components["opt_b_text"],
-            training_components["opt_c_text"],
-            training_components["opt_d_text"],
-            training_components["undo_status"],
-        ]
-
-        # Full outputs including stats
-        full_outputs = [
-            training_components["step_display"],
-            training_components["drift_display"],
-            training_components["dataset_info"],
-            training_components["prompt_display"],
-            training_components["opt_a_text"],
-            training_components["opt_b_text"],
-            training_components["opt_c_text"],
-            training_components["opt_d_text"],
-            training_components["undo_status"],
-        ]
-
         def stream_next_prompt_and_options():
             """Stream next prompt immediately, then generate and stream options."""
             if not app.engine or not app.engine.is_loaded:
                 yield (
                     "**Step:** 0", "**Drift:** 0.000", "**Dataset:** Not loaded",
-                    "*Model not loaded*",
+                    prompt_update("*Model not loaded*"),
                     "", "", "", "",
                     "",
+                    *selection_updates(False),
                 )
                 return
 
@@ -904,31 +949,72 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
             # Yield prompt immediately with generating placeholders
             yield (
                 stats[0], stats[1], stats[2],
-                f"**Prompt:**\n\n{app.current_prompt}",
+                prompt_update(f"**Prompt:**\n\n{app.current_prompt}", flash=True),
                 "Generating...",
                 "Generating...",
                 "Generating...",
                 "Generating...",
-                "",
+                "Generating... please wait",
+                *selection_updates(False),
             )
 
-            # Generate options (slow - this is where model inference happens)
-            app.current_options = app.engine.generate_options(app.current_prompt)
+            prompt_display = f"**Prompt:**\n\n{app.current_prompt}"
+            final_options: list[str] = []
+            streamed = False
 
+            if hasattr(app.engine, "generate_options_streaming"):
+                try:
+                    for options in app.engine.generate_options_streaming(app.current_prompt):
+                        streamed = True
+                        opt_texts = format_options_for_display(options)
+                        final_options = opt_texts
+                        yield (
+                            stats[0], stats[1], stats[2],
+                            gr.skip(),
+                            opt_texts[0] if len(opt_texts) > 0 else "",
+                            opt_texts[1] if len(opt_texts) > 1 else "",
+                            opt_texts[2] if len(opt_texts) > 2 else "",
+                            opt_texts[3] if len(opt_texts) > 3 else "",
+                            "Generating... please wait",
+                            *selection_updates(False),
+                        )
+                except Exception:
+                    streamed = False
+
+            if not streamed or not final_options:
+                # Fallback to blocking generation
+                app.current_options = app.engine.generate_options(app.current_prompt)
+                if app.journal:
+                    app.journal.log_generation(app.current_prompt, len(app.current_options))
+
+                opt_texts = format_options_for_display(app.current_options)
+
+                yield (
+                    stats[0], stats[1], stats[2],
+                    prompt_update(prompt_display),
+                    opt_texts[0] if len(opt_texts) > 0 else "",
+                    opt_texts[1] if len(opt_texts) > 1 else "",
+                    opt_texts[2] if len(opt_texts) > 2 else "",
+                    opt_texts[3] if len(opt_texts) > 3 else "",
+                    "",
+                    *selection_updates(True),
+                )
+                return
+
+            app.current_options = final_options
             if app.journal:
                 app.journal.log_generation(app.current_prompt, len(app.current_options))
 
             opt_texts = format_options_for_display(app.current_options)
-
-            # Yield final result with actual options
             yield (
                 stats[0], stats[1], stats[2],
-                f"**Prompt:**\n\n{app.current_prompt}",
+                prompt_update(prompt_display),
                 opt_texts[0] if len(opt_texts) > 0 else "",
                 opt_texts[1] if len(opt_texts) > 1 else "",
                 opt_texts[2] if len(opt_texts) > 2 else "",
                 opt_texts[3] if len(opt_texts) > 3 else "",
                 "",
+                *selection_updates(True),
             )
 
         def select_and_advance(choice_idx):
@@ -1010,6 +1096,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                     opt_texts[2] if len(opt_texts) > 2 else "",
                     opt_texts[3] if len(opt_texts) > 3 else "",
                     status,
+                    *selection_updates(True),
                 )
             else:
                 stats = app.get_stats()
@@ -1018,6 +1105,7 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                     gr.skip(),
                     gr.skip(), gr.skip(), gr.skip(), gr.skip(),
                     status,
+                    *selection_updates(True),
                 )
 
         training_components["undo_btn"].click(
