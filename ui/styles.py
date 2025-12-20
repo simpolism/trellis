@@ -179,7 +179,7 @@ button:disabled {
 }
 
 /* ========== Form Inputs ========== */
-input,
+input:not([type="checkbox"]):not([type="radio"]),
 textarea,
 select,
 .gr-input,
@@ -191,11 +191,18 @@ select,
     padding: 6px 8px !important;
 }
 
-input:focus,
+input:not([type="checkbox"]):not([type="radio"]):focus,
 textarea:focus,
 select:focus {
     outline: 2px solid var(--trellis-green) !important;
     outline-offset: -2px;
+}
+
+/* Preserve native checkbox/radio rendering */
+input[type="checkbox"],
+input[type="radio"] {
+    accent-color: var(--trellis-green) !important;
+    padding: 0 !important;
 }
 
 /* Slider */
