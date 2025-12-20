@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import os
+from contextlib import nullcontext
 from queue import Queue
 from threading import Thread
 from typing import TYPE_CHECKING, Optional
@@ -146,16 +147,11 @@ class UnslothEngine(BaseEngine):
             lora_alpha=self.config.lora_alpha,
             lora_dropout=self.config.lora_dropout,
             bias="none",
-            use_gradient_checkpointing=True,
+            use_gradient_checkpointing="unsloth",
             random_state=3407,
         )
 
         self._ensure_pad_token()
-
-        # Cast LoRA params to fp32 for training stability
-        for p in self.model.parameters():
-            if p.requires_grad:
-                p.data = p.data.float()
 
         # Persistent optimizer
         trainable = [p for p in self.model.parameters() if p.requires_grad]
@@ -165,7 +161,7 @@ class UnslothEngine(BaseEngine):
             weight_decay=self.config.weight_decay,
         )
 
-        self.model.eval()
+        self._set_inference_mode()
         print("Model ready.")
         return "Model ready."
 
@@ -197,6 +193,44 @@ class UnslothEngine(BaseEngine):
         if self.config.prompt_suffix:
             formatted = formatted + self.config.prompt_suffix
         return formatted
+
+    def _set_inference_mode(self) -> None:
+        if self.model is None:
+            return
+        if hasattr(self.model, "for_inference"):
+            self.model.for_inference()
+        else:
+            self.model.eval()
+
+    def _set_training_mode(self) -> None:
+        if self.model is None:
+            return
+        if hasattr(self.model, "for_training"):
+            self.model.for_training()
+        else:
+            self.model.train()
+
+    def _get_autocast_dtype(self) -> torch.dtype:
+        if self.model is None:
+            return torch.float16
+        try:
+            from unsloth_zoo.hf_utils import dtype_from_config
+            from unsloth_zoo.utils import _get_dtype
+
+            return _get_dtype(dtype_from_config(self.model.config))
+        except Exception:
+            for param in self.model.parameters():
+                if param.is_floating_point():
+                    return param.dtype
+        return torch.float16
+
+    def _autocast_context(self):
+        if self.device != "cuda":
+            return nullcontext()
+        dtype = self._get_autocast_dtype()
+        if dtype not in (torch.float16, torch.bfloat16):
+            return nullcontext()
+        return torch.autocast(device_type="cuda", dtype=dtype)
 
     def _build_inputs(self, prompt: str) -> tuple[torch.Tensor, int, str]:
         """Construct input ids with optional think tag and return prompt length."""
@@ -232,7 +266,7 @@ class UnslothEngine(BaseEngine):
         if self.model is None:
             raise RuntimeError("Model not loaded")
 
-        self.model.eval()
+        self._set_inference_mode()
 
         inputs, prompt_len, _ = self._build_inputs(prompt)
 
@@ -265,7 +299,7 @@ class UnslothEngine(BaseEngine):
         if self.model is None:
             raise RuntimeError("Model not loaded")
 
-        self.model.eval()
+        self._set_inference_mode()
 
         inputs, prompt_len, _ = self._build_inputs(prompt)
 
@@ -357,7 +391,7 @@ class UnslothEngine(BaseEngine):
 
         advantages = self._compute_advantages(choice_idx)
 
-        self.model.train()
+        self._set_training_mode()
         self.optimizer.zero_grad(set_to_none=True)
 
         # Policy logprobs
@@ -384,7 +418,7 @@ class UnslothEngine(BaseEngine):
         loss.backward()
         self.optimizer.step()
 
-        self.model.eval()
+        self._set_inference_mode()
 
         metrics = {
             "pg_loss": pg_loss.item(),
@@ -425,7 +459,8 @@ class UnslothEngine(BaseEngine):
         labels[:, :prompt_len] = -100
         labels[attention_mask == 0] = -100
 
-        outputs = model(input_ids, attention_mask=attention_mask, use_cache=False)
+        with self._autocast_context():
+            outputs = model(input_ids, attention_mask=attention_mask, use_cache=False)
         logits = outputs.logits
 
         shift_logits = logits[:, :-1, :]
