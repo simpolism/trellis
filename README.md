@@ -1,6 +1,6 @@
 # 🌿 Trellis
 
-Interactive preference steering with linear undo. Shape a model's personality through direct vibe-checks, walk changes forward/backward with checkpoints, and keep a narrative of how each step was made. Default setup uses **PleIAs/Baguettotron** (321M) in 16-bit with a LoRA head, with a toggle to fall back to 4-bit if VRAM is tight.
+Interactive preference steering with linear undo. Shape a model's personality through direct vibe-checks, walk changes forward/backward with checkpoints, and keep a narrative of how each step was made. Default setup uses **unsloth/gemma-3-1b-it-unsloth-bnb-4bit** with a LoRA head, loading in 4-bit by default.
 
 ## What it does
 
@@ -35,11 +35,11 @@ python trellis.py --port 7861 --host 127.0.0.1
 
 ## Hardware
 
-Default Baguettotron runs comfortably in 16-bit on midrange GPUs (the 321M base is small). Use the **Precision** toggle in Setup to switch to 4-bit quantization if you need to squeeze VRAM.
+Gemma 1B is lightweight; 4-bit comfortably fits on 16 GB GPUs, and 16-bit can work with modest context lengths. Use the **Precision** toggle in Setup and the VRAM check to find a safe configuration.
 
-## Prompt format (Baguettotron)
+## Prompt format
 
-The model uses a Qwen-style chat template:
+Trellis uses the model's chat template when provided. If a model does not ship one, Trellis falls back to a Qwen-style template like:
 
 ```xml
 <|im_start|>user
@@ -49,7 +49,7 @@ Who are you?<|im_end|>
 ```
 
 Trellis auto-appends `<think>` to the assistant preamble by default; disable it in **System Prompt & Wrapping** if you want to try replies without a thinking trace.
-Max context length is 4096 tokens for this model; set the slider accordingly in Setup.
+Default context length is 4096 tokens; set the slider to match your model and VRAM.
 
 ## Using Datasets
 

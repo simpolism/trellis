@@ -29,14 +29,9 @@ MODEL_ARCHITECTURES = {
 
 # Hand-tuned overrides for models we ship defaults for
 KNOWN_MODEL_SPECS = {
-    # Based on public description: 321M params, 80 layers, Qwen/Llama-like depth
-    "pleias/baguettotron": {
-        "params_billions": 0.321,
-        "num_layers": 80,
-        # Overestimate hidden size to stay conservative (actual spec not public)
-        "hidden_dim": 1024,
-        "intermediate_dim": 4096,
-        "mlp_ratio": 4,
+    # Default model (1B class); rely on architecture table for derived sizes.
+    "unsloth/gemma-3-1b-it-unsloth-bnb-4bit": {
+        "params_billions": 1.0,
     },
 }
 

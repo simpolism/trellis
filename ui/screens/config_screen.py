@@ -50,8 +50,8 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
             with gr.Row():
                 dataset_input = gr.Textbox(
                     label="Dataset ID",
-                    value="cosmicoptima/introspection-prompts",
-                    placeholder="e.g., cosmicoptima/introspection-prompts",
+                    value="abhayesian/introspection-prompts",
+                    placeholder="e.g., abhayesian/introspection-prompts",
                     scale=3,
                     info="HuggingFace dataset ID (e.g., 'username/dataset') or local folder path",
                 )
@@ -70,6 +70,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                 )
                 dataset_column = gr.Textbox(
                     label="Text Column (auto-detected)",
+                    value="text",
                     placeholder="Leave blank for auto",
                     scale=2,
                     info="Column containing prompts (usually auto-detected)",
@@ -93,9 +94,9 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
             )
             model_input = gr.Textbox(
                 label="Model Name",
-                value="PleIAs/Baguettotron",
+                value="unsloth/gemma-3-1b-it-unsloth-bnb-4bit",
                 placeholder="HuggingFace model ID or local path",
-                info="HuggingFace model ID (e.g., 'PleIAs/Baguettotron') or local folder path",
+                info="HuggingFace model ID (e.g., 'unsloth/gemma-3-1b-it-unsloth-bnb-4bit') or local folder path",
             )
             with gr.Row():
                 context_slider = gr.Slider(
@@ -137,8 +138,8 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
             )
 
             precision = gr.Radio(
-                choices=["16-bit (recommended for Baguettotron)", "4-bit (VRAM saver)"],
-                value="16-bit (recommended for Baguettotron)",
+                choices=["16-bit (best quality, high VRAM)", "4-bit (recommended default)"],
+                value="4-bit (recommended default)",
                 label="Precision",
                 info="16-bit trains best; switch to 4-bit if VRAM is tight.",
             )

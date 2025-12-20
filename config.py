@@ -17,9 +17,9 @@ class TrellisConfig:
     """All tunable parameters in one place."""
 
     # Model
-    model_name: str = "PleIAs/Baguettotron"
+    model_name: str = "unsloth/gemma-3-1b-it-unsloth-bnb-4bit"
     max_seq_length: int = 4096
-    load_in_4bit: bool = False
+    load_in_4bit: bool = True
     append_think_tag: bool = True
     think_tag: str = "<think>"
 
@@ -50,7 +50,7 @@ class TrellisConfig:
     save_dir: str = "./trellis_sessions"
 
     # Default dataset
-    default_dataset: str = "cosmicoptima/introspection-prompts"
+    default_dataset: str = "abhayesian/introspection-prompts"
     default_split: str = "train"
 
     # Optional prompt wrapping
