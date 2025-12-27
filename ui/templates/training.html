@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+
+{% block title %}Trellis - Training{% endblock %}
+
+{% block content %}
+<div id="stats-container" class="stats-header">
+    <div id="step-display">{{ step }}</div>
+    <div id="drift-display">{{ drift }}</div>
+    <div id="dataset-info">{{ dataset }}</div>
+</div>
+
+<hr>
+
+<h2>Training</h2>
+<p><em>Select your preferred response to steer the model.</em></p>
+
+<button class="primary" onclick="generateOptions()" style="margin-bottom: 16px;">
+    Generate Options
+</button>
+
+<div id="prompt-container">
+    <div id="prompt-display" class="prompt-card">
+        <strong>Prompt:</strong><br><br>
+        <em>Click "Generate Options" to begin...</em>
+    </div>
+    <textarea id="prompt-edit" style="display: none; width: 100%; min-height: 100px; margin: 8px 0;"></textarea>
+    <div id="edit-buttons" style="display: none; gap: 8px; margin: 8px 0;" class="action-row">
+        <button onclick="applyEdit()">Apply & Regenerate</button>
+        <button onclick="cancelEdit()">Cancel</button>
+    </div>
+    <button id="edit-btn" onclick="toggleEdit()" style="margin-top: 8px;">✏️ Edit Prompt</button>
+</div>
+
+<hr>
+
+<div id="options-container">
+    <p><em>Options will appear here after generation...</em></p>
+</div>
+
+<div id="action-status" style="margin-top: 16px;"></div>
+
+<hr>
+
+<div class="action-row">
+    <button class="skip-btn"
+            hx-post="/training/skip"
+            hx-target="#action-status"
+            hx-swap="innerHTML">
+        Skip
+    </button>
+    <button class="undo-btn" onclick="performUndo()">
+        Undo
+    </button>
+</div>
+
+<hr>
+
+<!-- Session Save -->
+<div class="card">
+    <h3>Save Session</h3>
+    <div style="display: flex; gap: 8px; align-items: flex-end;">
+        <div class="form-group" style="flex: 1; margin: 0;">
+            <label for="session-name">Session Name (optional)</label>
+            <input type="text"
+                   id="session-name"
+                   name="session_name"
+                   placeholder="My training session">
+        </div>
+        <button onclick="saveSession()" style="margin-bottom: 0;">Save Session</button>
+    </div>
+    <div id="save-status" style="margin-top: 8px;"></div>
+</div>
+
+<hr>
+
+<div style="text-align: center;">
+    <a href="/review"><button class="primary">Done - Review Results</button></a>
+</div>
+
+<script>
+function saveSession() {
+    const sessionName = document.getElementById('session-name').value;
+    const formData = new URLSearchParams();
+    formData.append('session_name', sessionName);
+
+    fetch('/training/save-session', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
+    })
+    .then(response => response.text())
+    .then(html => {
+        document.getElementById('save-status').innerHTML = html;
+    })
+    .catch(error => {
+        document.getElementById('save-status').innerHTML =
+            '<p style="color: var(--danger);">Error: ' + error.message + '</p>';
+    });
+}
+
+function performUndo() {
+    fetch('/training/undo', {
+        method: 'POST',
+        credentials: 'include'
+    })
+    .then(response => response.text())
+    .then(html => {
+        // Parse the HTML to extract components
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+
+        // Update stats
+        const statsContainer = doc.querySelector('.stats-header');
+        if (statsContainer) {
+            document.getElementById('stats-container').innerHTML = statsContainer.innerHTML;
+        }
+
+        // Update prompt
+        const promptCard = doc.querySelector('.prompt-card');
+        if (promptCard) {
+            document.getElementById('prompt-display').innerHTML = promptCard.innerHTML;
+        }
+
+        // Update options
+        const optionsContainer = doc.querySelector('#options-container');
+        if (optionsContainer) {
+            document.getElementById('options-container').innerHTML = optionsContainer.innerHTML;
+            htmx.process(document.getElementById('options-container'));
+        }
+
+        // Update action status
+        const actionStatus = doc.querySelector('#action-status');
+        if (actionStatus) {
+            document.getElementById('action-status').innerHTML = actionStatus.innerHTML;
+        }
+    })
+    .catch(error => {
+        document.getElementById('action-status').innerHTML =
+            '<p style="color: var(--danger);">Error: ' + error.message + '</p>';
+    });
+}
+</script>
+
+<script>
+let currentEventSource = null;
+let currentPromptText = '';
+
+function toggleEdit() {
+    const display = document.getElementById('prompt-display');
+    const edit = document.getElementById('prompt-edit');
+    const editButtons = document.getElementById('edit-buttons');
+    const editBtn = document.getElementById('edit-btn');
+
+    // Extract just the prompt text (remove "Prompt:" prefix)
+    const fullText = display.textContent || display.innerText;
+    const promptMatch = fullText.match(/Prompt:\s*([\s\S]*)/);
+    const promptText = promptMatch ? promptMatch[1].trim() : fullText;
+
+    edit.value = promptText;
+    display.style.display = 'none';
+    edit.style.display = 'block';
+    editButtons.style.display = 'flex';
+    editBtn.style.display = 'none';
+}
+
+function cancelEdit() {
+    const display = document.getElementById('prompt-display');
+    const edit = document.getElementById('prompt-edit');
+    const editButtons = document.getElementById('edit-buttons');
+    const editBtn = document.getElementById('edit-btn');
+
+    display.style.display = 'block';
+    edit.style.display = 'none';
+    editButtons.style.display = 'none';
+    editBtn.style.display = 'inline-block';
+}
+
+function applyEdit() {
+    const newPrompt = document.getElementById('prompt-edit').value;
+    const formData = new URLSearchParams();
+    formData.append('new_prompt', newPrompt);
+
+    // Send edit request
+    fetch('/training/edit-prompt', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
+    })
+    .then(response => response.text())
+    .then(html => {
+        // Exit edit mode
+        cancelEdit();
+
+        // Update prompt display
+        document.getElementById('prompt-display').innerHTML =
+            '<strong>Prompt:</strong><br><br>' + newPrompt;
+
+        // Update options container with new options
+        document.getElementById('options-container').innerHTML = html;
+
+        // Process HTMX attributes in the new HTML
+        htmx.process(document.getElementById('options-container'));
+    })
+    .catch(error => {
+        alert('Error applying edit: ' + error.message);
+    });
+}
+
+function generateOptions() {
+    if (currentEventSource) {
+        currentEventSource.close();
+    }
+
+    const promptDisplay = document.getElementById('prompt-display');
+    const optionsContainer = document.getElementById('options-container');
+    const actionStatus = document.getElementById('action-status');
+
+    // Clear previous
+    actionStatus.innerHTML = '';
+    optionsContainer.innerHTML = '<p><em>Generating...</em></p>';
+
+    // Disable buttons
+    document.querySelectorAll('.option-btn, .skip-btn, .undo-btn').forEach(btn => {
+        btn.disabled = true;
+        btn.classList.add('generating');
+    });
+
+    currentEventSource = new EventSource('/training/generate-options', { withCredentials: true });
+
+    currentEventSource.addEventListener('prompt', (e) => {
+        promptDisplay.innerHTML = '<strong>Prompt:</strong><br><br>' + e.data;
+        promptDisplay.classList.add('prompt-flash');
+        setTimeout(() => promptDisplay.classList.remove('prompt-flash'), 600);
+    });
+
+    currentEventSource.addEventListener('options', (e) => {
+        const options = JSON.parse(e.data);
+        let html = '<h3>Select your preference:</h3>';
+
+        options.slice(0, 4).forEach((option, i) => {
+            const label = String.fromCharCode(65 + i);
+            html += `
+                <div class="option-group">
+                    <div class="option-header">${label}</div>
+                    <div class="option-text">${option}</div>
+                    <button class="option-btn primary"
+                            hx-post="/training/select-option/${i}"
+                            hx-target="#action-status"
+                            hx-swap="innerHTML"
+                            onclick="afterSelect()">
+                        Select ${label}
+                    </button>
+                </div>
+            `;
+        });
+
+        optionsContainer.innerHTML = html;
+        htmx.process(optionsContainer);
+    });
+
+    currentEventSource.addEventListener('stats', (e) => {
+        const stats = JSON.parse(e.data);
+        document.getElementById('step-display').innerHTML = stats.step;
+        document.getElementById('drift-display').innerHTML = stats.drift;
+        document.getElementById('dataset-info').innerHTML = stats.dataset;
+    });
+
+    currentEventSource.addEventListener('complete', () => {
+        currentEventSource.close();
+        // Re-enable buttons
+        document.querySelectorAll('.option-btn, .skip-btn, .undo-btn').forEach(btn => {
+            btn.disabled = false;
+            btn.classList.remove('generating');
+        });
+    });
+
+    currentEventSource.addEventListener('error', (e) => {
+        if (e.data) {
+            optionsContainer.innerHTML = '<p style="color: var(--danger);">' + e.data + '</p>';
+        }
+        currentEventSource.close();
+        // Re-enable buttons
+        document.querySelectorAll('.option-btn, .skip-btn, .undo-btn').forEach(btn => {
+            btn.disabled = false;
+            btn.classList.remove('generating');
+        });
+    });
+}
+
+function afterSelect() {
+    // Wait a moment to show the success message, then generate next
+    setTimeout(generateOptions, 1000);
+}
+</script>
+
+{% endblock %}

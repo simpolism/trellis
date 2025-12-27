@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Trellis - Review{% endblock %}
+
+{% block content %}
+<h2>Training Review</h2>
+
+<div class="stats-header">
+    <div>{{ steps }}</div>
+    <div>{{ drift }}</div>
+</div>
+
+<hr>
+
+<!-- Journal Section -->
+<div class="card">
+    <h3>Training Journal</h3>
+    <div class="journal-display">
+        {% if journal %}
+        {{ journal }}
+        {% else %}
+        <em>No journal entries yet.</em>
+        {% endif %}
+    </div>
+</div>
+
+<hr>
+
+<!-- Config Section -->
+<div class="card">
+    <h3>Configuration</h3>
+    <div class="accordion">
+        <button class="accordion-header" onclick="toggleAccordion('config-content')">
+            View Configuration
+        </button>
+        <div id="config-content" class="accordion-content" style="display: none;">
+            <pre>{{ config | tojson(indent=2) }}</pre>
+        </div>
+    </div>
+</div>
+
+<hr>
+
+<!-- Export Section -->
+<div class="card">
+    <h3>Export</h3>
+
+    <div class="form-group">
+        <label for="checkpoint-name">Checkpoint Name</label>
+        <input type="text"
+               id="checkpoint-name"
+               name="checkpoint_name"
+               value="checkpoint"
+               placeholder="checkpoint">
+    </div>
+
+    <button hx-post="/review/save-checkpoint"
+            hx-include="#checkpoint-name"
+            hx-target="#checkpoint-status">
+        Save LoRA Checkpoint
+    </button>
+
+    <div id="checkpoint-status"></div>
+
+    <hr style="margin: 16px 0;">
+
+    <div class="form-group">
+        <label for="merge-path">Merge Output Path</label>
+        <input type="text"
+               id="merge-path"
+               name="merge_path"
+               value="./merged_model"
+               placeholder="./merged_model">
+    </div>
+
+    <button onclick="connectMerge()">
+        Merge LoRA into Base Model
+    </button>
+
+    <div id="merge-status" style="margin-top: 8px;"></div>
+
+    <script>
+    function connectMerge() {
+        const mergePath = document.getElementById('merge-path').value;
+        const url = `/review/merge-lora?merge_path=${encodeURIComponent(mergePath)}`;
+
+        const statusDiv = document.getElementById('merge-status');
+        statusDiv.innerHTML = '';
+
+        const eventSource = new EventSource(url, { withCredentials: true });
+
+        eventSource.addEventListener('message', (e) => {
+            statusDiv.innerHTML += '<p>' + e.data + '</p>';
+        });
+
+        eventSource.addEventListener('complete', () => {
+            eventSource.close();
+        });
+
+        eventSource.addEventListener('error', (e) => {
+            if (e.data) {
+                statusDiv.innerHTML += '<p style="color: var(--danger);">' + e.data + '</p>';
+            }
+            eventSource.close();
+        });
+    }
+    </script>
+</div>
+
+<hr>
+
+<div style="text-align: center;">
+    <a href="/setup"><button class="primary">Start New Session</button></a>
+</div>
+
+{% endblock %}

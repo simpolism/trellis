@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Trellis{% endblock %}</title>
+
+    <!-- Trellis CSS -->
+    <link rel="stylesheet" href="/static/css/trellis.css">
+
+    <!-- HTMX Core -->
+    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+
+    <!-- HTMX SSE Extension -->
+    <script src="https://unpkg.com/htmx.org@2.0.3/dist/ext/sse.js"></script>
+
+    <!-- Custom HTMX Extensions -->
+    <script src="/static/js/htmx-ext.js" defer></script>
+</head>
+<body>
+    <header>
+        <h1>Trellis</h1>
+        <p><em>Interactive preference steering for language models</em></p>
+    </header>
+
+    <nav>
+        <a href="/setup" {% if active_tab == 'setup' %}class="active"{% endif %}>Setup</a>
+        <a href="/training" {% if active_tab == 'training' %}class="active"{% endif %}>Train</a>
+        <a href="/review" {% if active_tab == 'review' %}class="active"{% endif %}>Review</a>
+    </nav>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

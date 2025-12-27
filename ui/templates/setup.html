@@ -1,0 +1,483 @@
+{% extends "base.html" %}
+
+{% block title %}Trellis - Setup{% endblock %}
+
+{% block content %}
+<h2>Trellis Setup</h2>
+<p><em>Configure your training session and start steering.</em></p>
+
+<hr>
+
+<!-- Session Resume Section -->
+<div class="card">
+    <h3>Quick Resume</h3>
+    <p><em>Continue a previous training session. Sessions are automatically saved after each preference selection.</em></p>
+
+    {% if sessions %}
+    <div class="form-group">
+        <label for="session-select">Existing Sessions</label>
+        <select id="session-select" name="session_select">
+            <option value="">-- Select a session --</option>
+            {% for display_name, path in sessions %}
+            <option value="{{ path }}">{{ display_name }}</option>
+            {% endfor %}
+        </select>
+        <div class="info-text">Select a saved session to resume</div>
+    </div>
+
+    <button class="primary" onclick="resumeSession()">
+        Resume Session Now
+    </button>
+    {% else %}
+    <p><em>No existing sessions found. Start a new session below.</em></p>
+    {% endif %}
+
+    <div id="resume-status" style="margin-top: 8px;"></div>
+
+    <script>
+    function resumeSession() {
+        const sessionSelect = document.getElementById('session-select');
+        const sessionPath = sessionSelect.value;
+
+        if (!sessionPath) {
+            document.getElementById('resume-status').innerHTML =
+                '<p style="color: var(--danger);">Please select a session first</p>';
+            return;
+        }
+
+        const formData = new URLSearchParams();
+        formData.append('session_select', sessionPath);
+
+        const statusDiv = document.getElementById('resume-status');
+        statusDiv.innerHTML = '<p><em>Resuming session...</em></p>';
+
+        fetch('/setup/resume-session', {
+            method: 'POST',
+            body: formData,
+            credentials: 'include'
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Failed to resume session');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            function readStream() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        return;
+                    }
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    lines.forEach(line => {
+                        if (line.startsWith('data: ')) {
+                            const data = line.substring(6);
+                            statusDiv.innerHTML += '<p>' + data + '</p>';
+                        } else if (line.includes('event: redirect')) {
+                            setTimeout(() => {
+                                window.location.href = '/training';
+                            }, 500);
+                        }
+                    });
+
+                    readStream();
+                });
+            }
+
+            readStream();
+        })
+        .catch(error => {
+            statusDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + error.message + '</p>';
+        });
+    }
+    </script>
+</div>
+
+<hr>
+
+<!-- Dataset Section -->
+<div class="card">
+    <h3>Dataset</h3>
+    <p><em>Choose the prompts that will be used to train your model.</em></p>
+
+    <div class="form-group">
+        <label for="dataset-id">Dataset ID</label>
+        <input type="text"
+               id="dataset-id"
+               name="dataset_id"
+               value="{{ default_dataset }}"
+               placeholder="e.g., abhayesian/introspection-prompts">
+        <div class="info-text">HuggingFace dataset ID or local folder path</div>
+    </div>
+
+    <div class="form-group">
+        <label for="dataset-subset">Subset (optional)</label>
+        <input type="text" id="dataset-subset" name="dataset_subset" placeholder="e.g., persona">
+    </div>
+
+    <div class="form-group">
+        <label for="dataset-split">Split</label>
+        <select id="dataset-split" name="dataset_split">
+            <option value="train" selected>train</option>
+            <option value="test">test</option>
+            <option value="validation">validation</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="dataset-column">Text Column (auto-detected)</label>
+        <input type="text" id="dataset-column" name="dataset_column" value="text" placeholder="Leave blank for auto">
+        <div class="info-text">Column containing prompts (usually auto-detected)</div>
+    </div>
+
+    <button hx-post="/setup/preview-dataset"
+            hx-include="#dataset-id, #dataset-subset, #dataset-split, #dataset-column"
+            hx-target="#dataset-preview">
+        Load & Preview Dataset
+    </button>
+
+    <div id="dataset-preview" style="margin-top: 16px;"></div>
+</div>
+
+<hr>
+
+<!-- Model Section -->
+<div class="card">
+    <h3>Model</h3>
+    <p><em>Select the base model to train.</em></p>
+
+    <div class="form-group">
+        <label for="model-name">Model Name</label>
+        <input type="text"
+               id="model-name"
+               name="model_name"
+               value="unsloth/gemma-3-1b-it-unsloth-bnb-4bit"
+               placeholder="HuggingFace model ID or local path">
+    </div>
+
+    <div style="display: flex; gap: 16px;">
+        <div class="form-group" style="flex: 2;">
+            <label for="context-length">Context Length</label>
+            <input type="number"
+                   id="context-length"
+                   name="context_length"
+                   value="4096"
+                   min="512"
+                   max="8192"
+                   step="256">
+            <div class="info-text">Max tokens per prompt+response. Higher = more memory</div>
+        </div>
+        <div class="form-group" style="flex: 1;">
+            <label for="group-size">Options per Prompt</label>
+            <input type="number"
+                   id="group-size"
+                   name="group_size"
+                   value="4"
+                   min="2"
+                   max="8">
+            <div class="info-text">How many response options to generate</div>
+        </div>
+    </div>
+
+    <button class="secondary" onclick="connectModelLoading()">Load Model</button>
+
+    <div id="model-status" style="margin-top: 8px;"></div>
+
+    <script>
+    function connectModelLoading() {
+        const modelName = document.getElementById('model-name').value;
+        const precision = document.getElementById('precision').value;
+        const url = `/setup/load-model?model_name=${encodeURIComponent(modelName)}&precision=${encodeURIComponent(precision)}`;
+
+        const statusDiv = document.getElementById('model-status');
+        statusDiv.innerHTML = '';
+        const eventSource = new EventSource(url, { withCredentials: true });
+
+        eventSource.addEventListener('message', (e) => {
+            statusDiv.innerHTML += '<p>' + e.data + '</p>';
+        });
+
+        eventSource.addEventListener('complete', () => {
+            eventSource.close();
+        });
+
+        eventSource.addEventListener('error', (e) => {
+            if (e.data) {
+                statusDiv.innerHTML += '<p style="color: var(--danger);">' + e.data + '</p>';
+            }
+            eventSource.close();
+        });
+    }
+    </script>
+</div>
+
+<hr>
+
+<!-- Training Engine Section -->
+<div class="card">
+    <h3>Training Engine</h3>
+
+    <div class="form-group">
+        <label for="engine">Engine</label>
+        <select id="engine" name="engine_name">
+            <option value="UnSloth (LoRA)" selected>UnSloth (LoRA)</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="precision">Precision</label>
+        <select id="precision" name="precision">
+            <option value="4-bit" selected>4-bit (recommended default)</option>
+            <option value="16-bit">16-bit (best quality, high VRAM)</option>
+        </select>
+        <div class="info-text">16-bit trains best; switch to 4-bit if VRAM is tight.</div>
+    </div>
+
+    <h4>Generation Settings</h4>
+    <div style="display: flex; gap: 16px;">
+        <div class="form-group" style="flex: 1;">
+            <label for="temperature">Temperature</label>
+            <input type="number"
+                   id="temperature"
+                   name="temperature"
+                   value="1.2"
+                   min="0.1"
+                   max="2.0"
+                   step="0.1">
+            <div class="info-text">Higher = more creative/random</div>
+        </div>
+        <div class="form-group" style="flex: 1;">
+            <label for="max-new-tokens">Max New Tokens</label>
+            <input type="number"
+                   id="max-new-tokens"
+                   name="max_new_tokens"
+                   value="256"
+                   min="64"
+                   max="4096"
+                   step="64">
+            <div class="info-text">Maximum length of generated responses</div>
+        </div>
+    </div>
+
+    <h4>Training Settings</h4>
+    <div style="display: flex; gap: 16px;">
+        <div class="form-group" style="flex: 1;">
+            <label for="learning-rate">Learning Rate</label>
+            <input type="text"
+                   id="learning-rate"
+                   name="learning_rate"
+                   value="2e-5"
+                   placeholder="2e-5">
+            <div class="info-text">How fast the model learns. Default is conservative</div>
+        </div>
+        <div class="form-group" style="flex: 1;">
+            <label for="kl-beta">KL Beta</label>
+            <input type="number"
+                   id="kl-beta"
+                   name="kl_beta"
+                   value="0.03"
+                   min="0"
+                   max="1"
+                   step="0.01">
+            <div class="info-text">Anchor strength. Higher = stays closer to base model</div>
+        </div>
+    </div>
+
+    <h4>LoRA Settings</h4>
+    <p><em>LoRA trains small adapter layers instead of the full model, reducing memory usage.</em></p>
+    <div style="display: flex; gap: 16px;">
+        <div class="form-group" style="flex: 1;">
+            <label for="lora-rank">Rank</label>
+            <input type="number"
+                   id="lora-rank"
+                   name="lora_rank"
+                   value="16"
+                   min="8"
+                   max="128"
+                   step="8">
+            <div class="info-text">Adapter capacity. Higher = more expressive</div>
+        </div>
+        <div class="form-group" style="flex: 1;">
+            <label for="lora-alpha">Alpha</label>
+            <input type="number"
+                   id="lora-alpha"
+                   name="lora_alpha"
+                   value="16"
+                   min="8"
+                   max="128"
+                   step="8">
+            <div class="info-text">Scaling factor. Usually set equal to rank</div>
+        </div>
+    </div>
+</div>
+
+<hr>
+
+<!-- Undo & Checkpoints Section -->
+<div class="card">
+    <h3>Undo & Checkpoints</h3>
+    <p><em>Trellis saves checkpoints after each step, allowing you to undo mistakes.</em></p>
+
+    <div class="form-group">
+        <label for="max-undos">Max Checkpoints to Keep</label>
+        <input type="number"
+               id="max-undos"
+               name="max_undos"
+               placeholder="Leave blank for unlimited"
+               min="1">
+        <div class="info-text">Leave blank for unlimited (recommended for short sessions)</div>
+    </div>
+    <p><em>Each checkpoint uses ~500MB for an 8B model. Unlimited checkpoints recommended for sessions under 50 steps.</em></p>
+</div>
+
+<hr>
+
+<!-- System Prompt Section -->
+<div class="card">
+    <h3>System Prompt & Wrapping (Advanced)</h3>
+    <details>
+        <summary style="cursor: pointer; font-weight: 600; padding: 8px 0;">
+            ▶ Show Advanced Options
+        </summary>
+        <div style="margin-top: 12px;">
+            <p><em>Customize how prompts are formatted before being sent to the model. Most users can leave these blank.</em></p>
+
+            <div class="form-group">
+                <label for="system-prompt">System Prompt (optional)</label>
+                <textarea id="system-prompt"
+                          name="system_prompt"
+                          rows="3"
+                          placeholder="Custom system prompt for the model..."></textarea>
+                <div class="info-text">Sets the model's role or persona</div>
+            </div>
+
+            <div style="display: flex; gap: 16px;">
+                <div class="form-group" style="flex: 1;">
+                    <label for="prompt-prefix">Prompt Prefix</label>
+                    <input type="text"
+                           id="prompt-prefix"
+                           name="prompt_prefix"
+                           placeholder="Added before each prompt">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label for="prompt-suffix">Prompt Suffix</label>
+                    <input type="text"
+                           id="prompt-suffix"
+                           name="prompt_suffix"
+                           placeholder="Added after each prompt">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <input type="checkbox"
+                           id="append-think-tag"
+                           name="append_think_tag"
+                           checked>
+                    Append &lt;think&gt; to assistant prompt
+                </label>
+                <div class="info-text">Enable to automatically prepend &lt;think&gt; so responses start with a reasoning tag.</div>
+            </div>
+        </div>
+    </details>
+</div>
+
+<hr>
+
+<!-- Go Button -->
+<div style="text-align: center; margin-top: 24px;">
+    <button class="primary"
+            style="font-size: 16px; padding: 12px 32px;"
+            onclick="startTrainingSession()">
+        Go! Start Training
+    </button>
+</div>
+
+<div id="go-status" style="margin-top: 16px; text-align: center;"></div>
+
+<script>
+function startTrainingSession() {
+    // Collect all form values
+    const formData = new URLSearchParams();
+    formData.append('model_name', document.getElementById('model-name').value);
+    formData.append('context_length', document.getElementById('context-length').value);
+    formData.append('group_size', document.getElementById('group-size').value);
+    formData.append('engine_name', document.getElementById('engine').value);
+    formData.append('learning_rate', parseFloat(document.getElementById('learning-rate').value));
+    formData.append('kl_beta', document.getElementById('kl-beta').value);
+    formData.append('temperature', document.getElementById('temperature').value);
+    formData.append('max_new_tokens', document.getElementById('max-new-tokens').value);
+    formData.append('lora_rank', document.getElementById('lora-rank').value);
+    formData.append('lora_alpha', document.getElementById('lora-alpha').value);
+    formData.append('max_undos', document.getElementById('max-undos').value || '');
+    formData.append('system_prompt', document.getElementById('system-prompt').value || '');
+    formData.append('prompt_prefix', document.getElementById('prompt-prefix').value || '');
+    formData.append('prompt_suffix', document.getElementById('prompt-suffix').value || '');
+    formData.append('dataset_id', document.getElementById('dataset-id').value);
+    formData.append('dataset_subset', document.getElementById('dataset-subset').value || '');
+    formData.append('dataset_split', document.getElementById('dataset-split').value);
+    formData.append('dataset_column', document.getElementById('dataset-column').value || '');
+    formData.append('precision', document.getElementById('precision').value);
+    formData.append('append_think_tag', document.getElementById('append-think-tag').checked);
+
+    const statusDiv = document.getElementById('go-status');
+    statusDiv.innerHTML = '<p><em>Starting training session...</em></p>';
+
+    // Use fetch to POST, then connect SSE
+    fetch('/setup/start-training', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to start training session');
+        }
+
+        // Connect to SSE stream using response body
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        function readStream() {
+            reader.read().then(({ done, value }) => {
+                if (done) {
+                    return;
+                }
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+
+                lines.forEach(line => {
+                    if (line.startsWith('data: ')) {
+                        const data = line.substring(6);
+                        try {
+                            const parsed = JSON.parse(data);
+                            statusDiv.innerHTML += '<p>' + parsed + '</p>';
+                        } catch {
+                            statusDiv.innerHTML += '<p>' + data + '</p>';
+                        }
+                    } else if (line.includes('event: redirect')) {
+                        // Wait for next line with data
+                        setTimeout(() => {
+                            window.location.href = '/training';
+                        }, 500);
+                    }
+                });
+
+                readStream();
+            });
+        }
+
+        readStream();
+    })
+    .catch(error => {
+        statusDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + error.message + '</p>';
+    });
+}
+</script>
+
+{% endblock %}
