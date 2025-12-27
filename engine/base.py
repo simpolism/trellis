@@ -9,43 +9,11 @@ different backends (different LoRA implementations, different optimizers, etc.)
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from config import TrellisConfig
     from state.checkpoint import Checkpoint
-
-
-@dataclass
-class VRAMEstimate:
-    """VRAM breakdown for display to user."""
-
-    base_model_gb: float
-    lora_params_gb: float
-    kv_cache_gb: float
-    optimizer_gb: float
-    activations_gb: float
-    total_gb: float
-    fits_in_vram: bool
-    available_vram_gb: float
-    precision: str = "4-bit"
-
-    def to_display_string(self) -> str:
-        """Format for UI display."""
-        status = "OK" if self.fits_in_vram else "WARNING: May not fit!"
-        lines = [
-            f"**VRAM Estimate ({self.precision}):** {self.total_gb:.1f} GB",
-            f"- Base model: {self.base_model_gb:.1f} GB",
-            f"- LoRA parameters: {self.lora_params_gb:.2f} GB",
-            f"- KV cache: {self.kv_cache_gb:.2f} GB",
-            f"- Optimizer states: {self.optimizer_gb:.2f} GB",
-            f"- Activations: {self.activations_gb:.2f} GB",
-            "",
-            f"**Available:** {self.available_vram_gb:.1f} GB",
-            f"**Status:** {status}",
-        ]
-        return "\n".join(lines)
 
 
 class BaseEngine(ABC):
@@ -164,20 +132,6 @@ class BaseEngine(ABC):
 
         Returns:
             Status message
-        """
-        ...
-
-    @classmethod
-    @abstractmethod
-    def estimate_vram(cls, config: "TrellisConfig") -> VRAMEstimate:
-        """
-        Estimate VRAM requirements before loading.
-
-        Args:
-            config: Training configuration
-
-        Returns:
-            VRAMEstimate with breakdown
         """
         ...
 

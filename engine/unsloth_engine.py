@@ -17,8 +17,7 @@ from typing import TYPE_CHECKING, Optional
 import torch
 import torch.nn.functional as F
 
-from .base import BaseEngine, VRAMEstimate
-from .vram import estimate_vram_unsloth
+from .base import BaseEngine
 
 if TYPE_CHECKING:
     from config import TrellisConfig
@@ -559,8 +558,3 @@ class UnslothEngine(BaseEngine):
 
         except Exception as e:
             return f"Error merging model: {e}"
-
-    @classmethod
-    def estimate_vram(cls, config: "TrellisConfig") -> VRAMEstimate:
-        """Estimate VRAM requirements before loading."""
-        return estimate_vram_unsloth(config)

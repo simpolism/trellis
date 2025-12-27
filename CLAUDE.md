@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 - `trellis.py` is the entry point that boots the Gradio UI; `config.py` holds the tunable `TrellisConfig` dataclass.
-- `engine/` contains training/back-end logic (Unsloth adapter, VRAM helpers); `state/` tracks session checkpoints, undo stack, and tree metadata.
+- `engine/` contains training/back-end logic (Unsloth adapter, VRAM helpers); `state/` tracks session checkpoints and undo stack.
 - `data/` manages prompt sources and journaling; `ui/` houses the Gradio app wiring plus screen/component layouts and shared styles.
 - Runtime artifacts live under `trellis_sessions/` and `trellis_states/`; generated weights and compiled kernels land in `merged_model/` and `unsloth_compiled_cache/` (all gitignored—leave untouched or recreate).
 

@@ -126,7 +126,7 @@ class Journal:
 
     def generate_lineage_narrative(self, checkpoints: list["Checkpoint"]) -> str:
         """
-        Generate a clean narrative from the checkpoint history.
+        Generate a clean narrative from the linear checkpoint history.
         This is the "story" of choices, suitable for blog posts.
         """
         if not checkpoints:

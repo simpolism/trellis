@@ -9,7 +9,7 @@ Interactive preference steering with linear undo. Shape a model's personality th
 3. **Update** → LoRA weights shift toward your preference
 4. **Checkpoint** → linear undo stack captures adapter/optimizer state for rewind
 
-The state tree lets you checkpoint, branch, and compare different personality trajectories. The journal logs everything for later writeups.
+The linear undo stack lets you checkpoint and rewind to previous states. The journal logs everything for later writeups.
 
 ## Install
 
@@ -69,7 +69,7 @@ Once loaded, use **Next Prompt** in the Steer tab to pull prompts automatically.
 
 | Tab | Purpose |
 |-----|---------|
-| **Config** | Enter model + training hyperparams, dataset id/subset/column, VRAM estimate, and preview prompts |
+| **Setup** | Enter model + training hyperparams, dataset id/subset/column, VRAM estimate, and preview prompts |
 | **Train** | Generate options, pick/reject, checkpoint each step, undo/redo, edit prompts inline |
 | **Review** | Inspect session journal, view final stats, save adapters, merge LoRA, and start over |
 

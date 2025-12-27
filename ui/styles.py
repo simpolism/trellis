@@ -394,17 +394,6 @@ span.info {
     font-size: 12px;
 }
 
-/* ========== VRAM Display ========== */
-.vram-ok {
-    color: var(--trellis-green) !important;
-    font-weight: 600;
-}
-
-.vram-warning {
-    color: var(--danger) !important;
-    font-weight: 600;
-}
-
 /* ========== Journal Display ========== */
 .journal-display {
     max-height: 450px;

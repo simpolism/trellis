@@ -21,9 +21,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import TrellisConfig
 from data.prompt_source import PromptSource
 from data.journal import Journal
-from engine.base import BaseEngine, VRAMEstimate
+from engine.base import BaseEngine
 from engine.unsloth_engine import UnslothEngine
-from engine.vram import estimate_vram_unsloth
 from state.checkpoint import Checkpoint
 from state.undo_stack import LinearUndoStack
 from state.session import SessionState, load_session
@@ -107,26 +106,6 @@ class TrellisApp:
         q3 = preview[2] if len(preview) > 2 else ""
 
         return status, q1, q2, q3
-
-    def check_vram(
-        self,
-        model_name: str,
-        context_length: int,
-        group_size: int,
-        lora_rank: int,
-        precision_choice: str,
-    ) -> str:
-        """Estimate VRAM requirements."""
-        load_in_4bit = "4-bit" in (precision_choice or "").lower()
-        temp_config = TrellisConfig(
-            model_name=model_name,
-            max_seq_length=int(context_length),
-            group_size=int(group_size),
-            lora_rank=int(lora_rank),
-            load_in_4bit=load_in_4bit,
-        )
-        estimate = estimate_vram_unsloth(temp_config)
-        return estimate.to_display_string()
 
     def load_model_only(
         self,
@@ -658,21 +637,6 @@ def build_ui(app: TrellisApp) -> gr.Blocks:
                 config_components["preview_q2"],
                 config_components["preview_q3"],
             ],
-        )
-
-        def check_vram(model, context, group, rank, precision_choice):
-            return app.check_vram(model, context, group, rank, precision_choice)
-
-        config_components["check_vram_btn"].click(
-            check_vram,
-            inputs=[
-                config_components["model_input"],
-                config_components["context_slider"],
-                config_components["group_size"],
-                config_components["lora_rank"],
-                config_components["precision"],
-            ],
-            outputs=[config_components["vram_display"]],
         )
 
         # Load model button (separate from Go)

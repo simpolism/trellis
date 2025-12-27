@@ -3,7 +3,7 @@ Config Screen (Screen 1)
 ========================
 
 The opening configuration screen with dataset selection, model settings,
-training parameters, and VRAM checking.
+training parameters, and model loading.
 """
 
 from __future__ import annotations
@@ -206,11 +206,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
                     info="Scaling factor. Usually set equal to rank",
                 )
 
-            with gr.Row():
-                check_vram_btn = gr.Button("Check VRAM", variant="secondary", scale=1)
-                load_model_btn = gr.Button("Load Model", variant="secondary", scale=1)
-
-            vram_display = gr.Markdown("*Pick precision, then click 'Check VRAM' to estimate memory requirements.*")
+            load_model_btn = gr.Button("Load Model", variant="secondary")
             model_status = gr.Markdown("")
 
         gr.Markdown("---")
@@ -294,9 +290,7 @@ def build_config_screen() -> tuple[gr.Tab, dict]:
         "model_input": model_input,
         "context_slider": context_slider,
         "group_size": group_size,
-        "check_vram_btn": check_vram_btn,
         "load_model_btn": load_model_btn,
-        "vram_display": vram_display,
         "model_status": model_status,
         # Engine
         "engine_dropdown": engine_dropdown,
