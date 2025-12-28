@@ -42,6 +42,12 @@
 <hr>
 
 <div class="action-row">
+    <button class="reject-btn"
+            hx-post="/training/select-option/{{ group_size }}"
+            hx-target="#action-status"
+            hx-swap="innerHTML">
+        None of These
+    </button>
     <button class="skip-btn"
             hx-post="/training/skip"
             hx-target="#action-status"
@@ -78,6 +84,8 @@
 </div>
 
 <script>
+const groupSize = {{ group_size | default(4) }};
+
 function saveSession() {
     const sessionName = document.getElementById('session-name').value;
     const formData = new URLSearchParams();
@@ -143,7 +151,6 @@ function performUndo() {
 
 <script>
 let currentEventSource = null;
-let currentPromptText = '';
 
 function toggleEdit() {
     const display = document.getElementById('prompt-display');
@@ -220,7 +227,7 @@ function generateOptions() {
     optionsContainer.innerHTML = '<p><em>Generating...</em></p>';
 
     // Disable buttons
-    document.querySelectorAll('.option-btn, .skip-btn, .undo-btn').forEach(btn => {
+    document.querySelectorAll('.option-btn, .reject-btn, .skip-btn, .undo-btn').forEach(btn => {
         btn.disabled = true;
         btn.classList.add('generating');
     });
@@ -237,7 +244,7 @@ function generateOptions() {
         const options = JSON.parse(e.data);
         let html = '<h3>Select your preference:</h3>';
 
-        options.slice(0, 4).forEach((option, i) => {
+        options.slice(0, groupSize).forEach((option, i) => {
             const label = String.fromCharCode(65 + i);
             html += `
                 <div class="option-group">
@@ -246,8 +253,7 @@ function generateOptions() {
                     <button class="option-btn primary"
                             hx-post="/training/select-option/${i}"
                             hx-target="#action-status"
-                            hx-swap="innerHTML"
-                            onclick="afterSelect()">
+                            hx-swap="innerHTML">
                         Select ${label}
                     </button>
                 </div>
@@ -268,7 +274,7 @@ function generateOptions() {
     currentEventSource.addEventListener('complete', () => {
         currentEventSource.close();
         // Re-enable buttons
-        document.querySelectorAll('.option-btn, .skip-btn, .undo-btn').forEach(btn => {
+        document.querySelectorAll('.option-btn, .reject-btn, .skip-btn, .undo-btn').forEach(btn => {
             btn.disabled = false;
             btn.classList.remove('generating');
         });
@@ -280,17 +286,28 @@ function generateOptions() {
         }
         currentEventSource.close();
         // Re-enable buttons
-        document.querySelectorAll('.option-btn, .skip-btn, .undo-btn').forEach(btn => {
+        document.querySelectorAll('.option-btn, .reject-btn, .skip-btn, .undo-btn').forEach(btn => {
             btn.disabled = false;
             btn.classList.remove('generating');
         });
     });
 }
 
-function afterSelect() {
-    // Wait a moment to show the success message, then generate next
-    setTimeout(generateOptions, 1000);
-}
+document.body.addEventListener('htmx:afterSwap', function (evt) {
+    if (!evt.target || evt.target.id !== 'action-status') {
+        return;
+    }
+    const source = evt.detail.elt;
+    if (!source) {
+        return;
+    }
+    const shouldAdvance = source.classList.contains('option-btn')
+        || source.classList.contains('reject-btn')
+        || source.classList.contains('skip-btn');
+    if (shouldAdvance) {
+        generateOptions();
+    }
+});
 </script>
 
 {% endblock %}

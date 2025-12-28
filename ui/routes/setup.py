@@ -7,16 +7,30 @@ Routes for the setup/configuration screen.
 
 from __future__ import annotations
 
-import json
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
-from fastapi import APIRouter, Form, Cookie, Response
+from fastapi import APIRouter, Form, Cookie, Query
 from fastapi.responses import HTMLResponse
 from sse_starlette.sse import EventSourceResponse
 
 from ui.session_manager import session_manager
 
 router = APIRouter(prefix="/setup", tags=["setup"])
+
+
+def _parse_optional_int(value: Optional[str]) -> Optional[int]:
+    """Convert empty strings to None for optional integer fields."""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return int(value)
+
+
+def _attach_session_cookie(response, session_id: str, created: bool) -> None:
+    """Persist session id when we had to create a new app."""
+    if created:
+        response.set_cookie("session_id", session_id, httponly=True, max_age=7200)
 
 
 @router.post("/preview-dataset")
@@ -28,9 +42,7 @@ async def preview_dataset(
     session_id: str = Cookie(None),
 ):
     """Load dataset and return preview HTML fragment."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return "<p><strong>Error:</strong> No session found</p>"
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     try:
         status, q1, q2, q3 = app.preview_dataset(
@@ -60,47 +72,61 @@ async def preview_dataset(
             </div>
         </div>
         """
-        return HTMLResponse(content=html)
+        response = HTMLResponse(content=html)
+        _attach_session_cookie(response, session_id, created)
+        return response
 
     except Exception as e:
-        return HTMLResponse(content=f"<p><strong>Error:</strong> {str(e)}</p>")
+        response = HTMLResponse(content=f"<p><strong>Error:</strong> {str(e)}</p>")
+        _attach_session_cookie(response, session_id, created)
+        return response
 
 
-@router.post("/load-model")
+@router.get("/load-model")
 async def load_model(
-    model_name: str = Form(...),
-    precision: str = Form("4-bit"),
+    model_name: str = Query(...),
+    context_length: int = Query(4096),
+    group_size: int = Query(4),
+    engine_name: str = Query("UnSloth (LoRA)"),
+    learning_rate: float = Query(2e-5),
+    kl_beta: float = Query(0.03),
+    temperature: float = Query(1.2),
+    max_new_tokens: int = Query(256),
+    lora_rank: int = Query(16),
+    lora_alpha: int = Query(16),
+    max_undos: Optional[str] = Query(None),
+    system_prompt: str = Query(""),
+    prompt_prefix: str = Query(""),
+    prompt_suffix: str = Query(""),
+    dataset_id: str = Query("abhayesian/introspection-prompts"),
+    precision: str = Query("4-bit"),
+    append_think_tag: bool = Query(True),
     session_id: str = Cookie(None),
 ):
     """Load model with SSE status streaming."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return HTMLResponse(content="<p><strong>Error:</strong> No session found</p>")
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     async def event_stream() -> AsyncIterator[dict]:
         """Stream model loading status."""
         try:
-            # Use default parameters for a simple load
-            load_in_4bit = "4-bit" in precision.lower()
-
             for status in app.load_model_only(
                 model_name=model_name,
-                context_length=4096,
-                group_size=4,
-                engine_name="UnSloth (LoRA)",
-                learning_rate=2e-5,
-                kl_beta=0.03,
-                temperature=1.2,
-                max_new_tokens=256,
-                lora_rank=16,
-                lora_alpha=16,
-                max_undos=None,
-                system_prompt="",
-                prompt_prefix="",
-                prompt_suffix="",
-                dataset_id="abhayesian/introspection-prompts",
+                context_length=context_length,
+                group_size=group_size,
+                engine_name=engine_name,
+                learning_rate=learning_rate,
+                kl_beta=kl_beta,
+                temperature=temperature,
+                max_new_tokens=max_new_tokens,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
+                max_undos=_parse_optional_int(max_undos),
+                system_prompt=system_prompt if system_prompt else "",
+                prompt_prefix=prompt_prefix,
+                prompt_suffix=prompt_suffix,
+                dataset_id=dataset_id,
                 precision_choice=precision,
-                append_think_tag=True,
+                append_think_tag=append_think_tag,
             ):
                 yield {"event": "message", "data": status}
 
@@ -112,7 +138,9 @@ async def load_model(
             yield {"event": "error", "data": f"❌ Error: {str(e)}"}
             yield {"event": "complete", "data": ""}
 
-    return EventSourceResponse(event_stream())
+    response = EventSourceResponse(event_stream())
+    _attach_session_cookie(response, session_id, created)
+    return response
 
 
 @router.post("/resume-session")
@@ -121,12 +149,12 @@ async def resume_session(
     session_id: str = Cookie(None),
 ):
     """Resume an existing session with SSE status streaming."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return HTMLResponse(content="<p><strong>Error:</strong> No session found</p>")
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     if not session_select:
-        return HTMLResponse(content="<p><strong>Error:</strong> Please select a session</p>")
+        response = HTMLResponse(content="<p><strong>Error:</strong> Please select a session</p>")
+        _attach_session_cookie(response, session_id, created)
+        return response
 
     async def event_stream() -> AsyncIterator[dict]:
         """Stream session resume status."""
@@ -143,7 +171,9 @@ async def resume_session(
             yield {"event": "error", "data": f"❌ Error: {str(e)}"}
             yield {"event": "complete", "data": ""}
 
-    return EventSourceResponse(event_stream())
+    response = EventSourceResponse(event_stream())
+    _attach_session_cookie(response, session_id, created)
+    return response
 
 
 @router.post("/start-training")
@@ -158,7 +188,7 @@ async def start_training(
     max_new_tokens: int = Form(256),
     lora_rank: int = Form(16),
     lora_alpha: int = Form(16),
-    max_undos: int = Form(None),
+    max_undos: Optional[str] = Form(None),
     system_prompt: str = Form(""),
     prompt_prefix: str = Form(""),
     prompt_suffix: str = Form(""),
@@ -171,9 +201,7 @@ async def start_training(
     session_id: str = Cookie(None),
 ):
     """Start training session with SSE status streaming."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return HTMLResponse(content="<p><strong>Error:</strong> No session found</p>")
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     async def event_stream() -> AsyncIterator[dict]:
         """Stream training initialization status."""
@@ -189,7 +217,7 @@ async def start_training(
                 max_new_tokens=max_new_tokens,
                 lora_rank=lora_rank,
                 lora_alpha=lora_alpha,
-                max_undos=max_undos,
+                max_undos=_parse_optional_int(max_undos),
                 system_prompt=system_prompt if system_prompt else "",
                 prompt_prefix=prompt_prefix,
                 prompt_suffix=prompt_suffix,
@@ -212,4 +240,6 @@ async def start_training(
             yield {"event": "error", "data": f"❌ Error: {str(e)}"}
             yield {"event": "complete", "data": ""}
 
-    return EventSourceResponse(event_stream())
+    response = EventSourceResponse(event_stream())
+    _attach_session_cookie(response, session_id, created)
+    return response

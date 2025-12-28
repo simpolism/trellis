@@ -20,8 +20,7 @@ if TYPE_CHECKING:
 
 def _get_trellis_app_class():
     """Lazy import of TrellisApp to avoid circular imports."""
-    # Import from existing ui/app.py which has the full implementation
-    # (even though it has Gradio deps - we'll clean that up later)
+    # Import from ui/app.py which contains the core app logic.
     from ui.app import TrellisApp
     return TrellisApp
 
@@ -43,6 +42,11 @@ class SessionManager:
         self._ttl = timedelta(minutes=ttl_minutes)
         self._lock = Lock()  # Thread safety for concurrent requests
 
+    def _new_app(self) -> object:
+        """Create a new TrellisApp instance."""
+        TrellisApp = _get_trellis_app_class()
+        return TrellisApp(base_save_dir=str(self.base_save_dir))
+
     def create_session(self) -> str:
         """
         Create new session with a TrellisApp instance.
@@ -51,14 +55,37 @@ class SessionManager:
             session_id (str): Secure random session identifier
         """
         session_id = secrets.token_urlsafe(32)
-
-        TrellisApp = _get_trellis_app_class()
-        app = TrellisApp(base_save_dir=str(self.base_save_dir))
+        app = self._new_app()
 
         with self._lock:
             self._sessions[session_id] = (app, datetime.now())
 
         return session_id
+
+    def get_or_create_app(self, session_id: Optional[str]) -> tuple[str, object, bool]:
+        """
+        Retrieve existing app or create a new one if missing.
+
+        Returns:
+            (session_id, app, created)
+        """
+        if session_id:
+            with self._lock:
+                if session_id in self._sessions:
+                    app, _ = self._sessions[session_id]
+                    self._sessions[session_id] = (app, datetime.now())
+                    return session_id, app, False
+
+            app = self._new_app()
+            with self._lock:
+                self._sessions[session_id] = (app, datetime.now())
+            return session_id, app, True
+
+        new_session_id = secrets.token_urlsafe(32)
+        app = self._new_app()
+        with self._lock:
+            self._sessions[new_session_id] = (app, datetime.now())
+        return new_session_id, app, True
 
     def get_app(self, session_id: str) -> Optional[object]:
         """

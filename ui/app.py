@@ -33,7 +33,7 @@ def _log(message: str):
 
 
 class TrellisApp:
-    """Main controller wiring engine, state, and Gradio UI."""
+    """Main controller wiring engine, state, and UI."""
 
     def __init__(self, base_save_dir: str = "./trellis_sessions"):
         self.base_save_dir = Path(base_save_dir)
@@ -590,4 +590,3 @@ class TrellisApp:
         drift = self.engine.compute_drift() if self.engine else 0.0
         drift_text = f"**Final Drift:** {drift:.3f}"
         return steps_text, drift_text
-

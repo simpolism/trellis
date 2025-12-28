@@ -13,14 +13,37 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 # Ensure the package is importable
 sys.path.insert(0, str(Path(__file__).parent))
 
+_WATCHFILES_IGNORE_PATTERN = "unsloth_compiled_cache/*"
+_WATCHFILES_IGNORE_DIR_PATTERN = "unsloth_compiled_cache/**"
+_WATCHFILES_IGNORE_ROOT = "unsloth_compiled_cache"
+_WATCHFILES_IGNORE_ANY_PATTERN = "*/unsloth_compiled_cache/*"
+_WATCHFILES_IGNORE_ANY_DIR_PATTERN = "*/unsloth_compiled_cache/**"
+_WATCHFILES_IGNORE_ANY_ROOT = "*/unsloth_compiled_cache"
+_RELOAD_EXCLUDES = [
+    _WATCHFILES_IGNORE_ROOT,
+    _WATCHFILES_IGNORE_PATTERN,
+    _WATCHFILES_IGNORE_DIR_PATTERN,
+    _WATCHFILES_IGNORE_ANY_ROOT,
+    _WATCHFILES_IGNORE_ANY_PATTERN,
+    _WATCHFILES_IGNORE_ANY_DIR_PATTERN,
+]
+_existing_ignore = os.environ.get("WATCHFILES_IGNORE")
+if _existing_ignore:
+    extra = ",".join(_RELOAD_EXCLUDES)
+    if extra not in _existing_ignore:
+        os.environ["WATCHFILES_IGNORE"] = f"{_existing_ignore},{extra}"
+else:
+    os.environ["WATCHFILES_IGNORE"] = ",".join(_RELOAD_EXCLUDES)
+
 import uvicorn
-from fastapi import FastAPI, Request, Cookie, Response, Form
+from fastapi import FastAPI, Request, Cookie
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -53,15 +76,9 @@ async def root():
 
 
 @app.get("/setup", response_class=HTMLResponse)
-async def setup_screen(request: Request, session_id: str = Cookie(None), response: Response = None):
+async def setup_screen(request: Request, session_id: str = Cookie(None)):
     """Setup screen - create session if needed."""
-    # Create session if needed
-    if not session_id or not session_manager.get_app(session_id):
-        session_id = session_manager.create_session()
-        response = Response()
-        response.set_cookie("session_id", session_id, httponly=True, max_age=7200)
-
-    app_instance = session_manager.get_app(session_id)
+    session_id, app_instance, new_session = session_manager.get_or_create_app(session_id)
 
     # Get existing sessions for resume dropdown
     sessions = []
@@ -71,13 +88,16 @@ async def setup_screen(request: Request, session_id: str = Cookie(None), respons
         except:
             sessions = []
 
-    return templates.TemplateResponse("setup.html", {
+    response = templates.TemplateResponse("setup.html", {
         "request": request,
         "active_tab": "setup",
         "sessions": sessions,
         "default_dataset": "abhayesian/introspection-prompts",
         "session_id": session_id,
     })
+    if new_session:
+        response.set_cookie("session_id", session_id, httponly=True, max_age=7200)
+    return response
 
 
 @app.get("/training", response_class=HTMLResponse)
@@ -89,6 +109,9 @@ async def training_screen(request: Request, session_id: str = Cookie(None)):
         return RedirectResponse(url="/setup")
 
     stats = app_instance.get_stats() if hasattr(app_instance, 'get_stats') else ("**Step:** 0", "**Drift:** 0.000", "**Dataset:** Not loaded")
+    group_size = 4
+    if hasattr(app_instance, "config") and app_instance.config:
+        group_size = app_instance.config.group_size
 
     return templates.TemplateResponse("training.html", {
         "request": request,
@@ -96,6 +119,7 @@ async def training_screen(request: Request, session_id: str = Cookie(None)):
         "step": stats[0],
         "drift": stats[1],
         "dataset": stats[2],
+        "group_size": group_size,
     })
 
 
@@ -178,6 +202,7 @@ def main():
         host=args.host,
         port=args.port,
         reload=args.reload,
+        reload_excludes=_RELOAD_EXCLUDES if args.reload else None,
     )
 
 

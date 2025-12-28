@@ -191,7 +191,28 @@
     function connectModelLoading() {
         const modelName = document.getElementById('model-name').value;
         const precision = document.getElementById('precision').value;
-        const url = `/setup/load-model?model_name=${encodeURIComponent(modelName)}&precision=${encodeURIComponent(precision)}`;
+        const params = new URLSearchParams();
+        params.set('model_name', modelName);
+        params.set('context_length', document.getElementById('context-length').value);
+        params.set('group_size', document.getElementById('group-size').value);
+        params.set('engine_name', document.getElementById('engine').value);
+        params.set('learning_rate', document.getElementById('learning-rate').value);
+        params.set('kl_beta', document.getElementById('kl-beta').value);
+        params.set('temperature', document.getElementById('temperature').value);
+        params.set('max_new_tokens', document.getElementById('max-new-tokens').value);
+        params.set('lora_rank', document.getElementById('lora-rank').value);
+        params.set('lora_alpha', document.getElementById('lora-alpha').value);
+        const maxUndos = document.getElementById('max-undos').value;
+        if (maxUndos) {
+            params.set('max_undos', maxUndos);
+        }
+        params.set('system_prompt', document.getElementById('system-prompt').value || '');
+        params.set('prompt_prefix', document.getElementById('prompt-prefix').value || '');
+        params.set('prompt_suffix', document.getElementById('prompt-suffix').value || '');
+        params.set('dataset_id', document.getElementById('dataset-id').value);
+        params.set('precision', precision);
+        params.set('append_think_tag', document.getElementById('append-think-tag').checked);
+        const url = `/setup/load-model?${params.toString()}`;
 
         const statusDiv = document.getElementById('model-status');
         statusDiv.innerHTML = '';
@@ -341,7 +362,7 @@
     <h3>System Prompt & Wrapping (Advanced)</h3>
     <details>
         <summary style="cursor: pointer; font-weight: 600; padding: 8px 0;">
-            ▶ Show Advanced Options
+            Show Advanced Options
         </summary>
         <div style="margin-top: 12px;">
             <p><em>Customize how prompts are formatted before being sent to the model. Most users can leave these blank.</em></p>

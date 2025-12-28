@@ -19,16 +19,33 @@ from ui.session_manager import session_manager
 router = APIRouter(prefix="/training", tags=["training"])
 
 
+def _attach_session_cookie(response, session_id: str, created: bool) -> None:
+    """Persist session id when we had to create a new app."""
+    if created:
+        response.set_cookie("session_id", session_id, httponly=True, max_age=7200)
+
+def _get_group_size(app, fallback: int = 4) -> int:
+    """Safely read configured group size for option rendering."""
+    if getattr(app, "config", None) and getattr(app.config, "group_size", None):
+        return app.config.group_size
+    if getattr(app, "current_options", None):
+        return len(app.current_options)
+    return fallback
+
+
 @router.get("/generate-options")
 async def generate_options(session_id: str = Cookie(None)):
     """Generate options with SSE streaming."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return HTMLResponse(content="<p>Error: No session found</p>")
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     async def event_stream() -> AsyncIterator[dict]:
         """Stream prompt and options as they generate."""
         try:
+            if not app.engine or not app.engine.is_loaded:
+                yield {"event": "error", "data": "Model not loaded"}
+                yield {"event": "complete", "data": ""}
+                return
+
             # Get next prompt
             prompt = app.prompt_source.next()
             if not prompt:
@@ -70,61 +87,72 @@ async def generate_options(session_id: str = Cookie(None)):
             yield {"event": "error", "data": f"Error: {str(e)}"}
             yield {"event": "complete", "data": ""}
 
-    return EventSourceResponse(event_stream())
+    response = EventSourceResponse(event_stream())
+    _attach_session_cookie(response, session_id, created)
+    return response
 
 
 @router.post("/select-option/{choice_idx}")
 async def select_option(choice_idx: int, session_id: str = Cookie(None)):
     """Select an option, train, and return HTML fragment."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return HTMLResponse(content="<p>Error: No session found</p>")
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     try:
         # Train on selection
         status, metrics = app.select_option(choice_idx)
 
+        label = (
+            f"option {chr(65 + choice_idx)}"
+            if choice_idx < len(app.current_options or [])
+            else "reject all"
+        )
         # Return success message
-        return HTMLResponse(content=f"""
+        response = HTMLResponse(content=f"""
         <div style="color: var(--trellis-green); font-weight: 600;">
-            ✅ Trained on option {chr(65 + choice_idx)}
+            ✅ Trained on {label}
         </div>
         """)
+        _attach_session_cookie(response, session_id, created)
+        return response
 
     except Exception as e:
-        return HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        response = HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        _attach_session_cookie(response, session_id, created)
+        return response
 
 
 @router.post("/skip")
 async def skip_prompt(session_id: str = Cookie(None)):
     """Skip current prompt without training."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return HTMLResponse(content="<p>Error: No session found</p>")
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     try:
         app.skip_prompt()
-        return HTMLResponse(content="""
+        response = HTMLResponse(content="""
         <div style="color: var(--gray-dark); font-weight: 600;">
             ⏭️ Skipped
         </div>
         """)
+        _attach_session_cookie(response, session_id, created)
+        return response
     except Exception as e:
-        return HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        response = HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        _attach_session_cookie(response, session_id, created)
+        return response
 
 
 @router.post("/undo")
 async def undo(session_id: str = Cookie(None)):
     """Undo to previous checkpoint and return HTML fragment."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return HTMLResponse(content="<p>Error: No session found</p>")
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     try:
         checkpoint, status = app.undo()
 
         if not checkpoint:
-            return HTMLResponse(content=f"<p>{status}</p>")
+            response = HTMLResponse(content=f"<p>{status}</p>")
+            _attach_session_cookie(response, session_id, created)
+            return response
 
         # Get stats after undo
         stats = app.get_stats()
@@ -149,7 +177,9 @@ async def undo(session_id: str = Cookie(None)):
 
         # Add option cards
         if checkpoint.options:
-            for i, option in enumerate(checkpoint.options[:4]):
+            group_size = _get_group_size(app)
+            option_count = min(len(checkpoint.options), group_size)
+            for i, option in enumerate(checkpoint.options[:option_count]):
                 label = chr(65 + i)
                 html += f"""
                 <div class="option-group">
@@ -172,10 +202,14 @@ async def undo(session_id: str = Cookie(None)):
         </div>
         """
 
-        return HTMLResponse(content=html)
+        response = HTMLResponse(content=html)
+        _attach_session_cookie(response, session_id, created)
+        return response
 
     except Exception as e:
-        return HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        response = HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        _attach_session_cookie(response, session_id, created)
+        return response
 
 
 @router.post("/edit-prompt")
@@ -184,16 +218,16 @@ async def edit_prompt(
     session_id: str = Cookie(None),
 ):
     """Regenerate with edited prompt."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return HTMLResponse(content="<p>Error: No session found</p>")
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     try:
         prompt, options = app.apply_edited_prompt(new_prompt)
 
         # Return HTML fragment with new options
         html = "<h3>Select your preference:</h3>"
-        for i, option in enumerate(options[:4]):
+        group_size = _get_group_size(app)
+        option_count = min(len(options), group_size)
+        for i, option in enumerate(options[:option_count]):
             label = chr(65 + i)
             html += f"""
             <div class="option-group">
@@ -208,10 +242,14 @@ async def edit_prompt(
             </div>
             """
 
-        return HTMLResponse(content=html)
+        response = HTMLResponse(content=html)
+        _attach_session_cookie(response, session_id, created)
+        return response
 
     except Exception as e:
-        return HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        response = HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        _attach_session_cookie(response, session_id, created)
+        return response
 
 
 @router.post("/save-session")
@@ -220,12 +258,14 @@ async def save_session(
     session_id: str = Cookie(None),
 ):
     """Save session with custom name."""
-    app = session_manager.get_app(session_id)
-    if not app:
-        return HTMLResponse(content="<p>Error: No session found</p>")
+    session_id, app, created = session_manager.get_or_create_app(session_id)
 
     try:
         result = app.save_session_with_name(session_name)
-        return HTMLResponse(content=f"<p style='color: var(--trellis-green);'>✅ {result}</p>")
+        response = HTMLResponse(content=f"<p style='color: var(--trellis-green);'>✅ {result}</p>")
+        _attach_session_cookie(response, session_id, created)
+        return response
     except Exception as e:
-        return HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        response = HTMLResponse(content=f"<p>Error: {str(e)}</p>")
+        _attach_session_cookie(response, session_id, created)
+        return response

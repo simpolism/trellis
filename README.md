@@ -19,7 +19,7 @@ source .venv/bin/activate
 
 UV_TORCH_BACKEND=cu128 uv pip install torch==2.9.1
 uv pip install "unsloth[cu128-torch291] @ git+https://github.com/unslothai/unsloth.git"
-uv pip install gradio peft packaging ninja einops
+uv pip install -r requirements.txt
 # Flash attention: optional but better perf
 uv pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.5.4/flash_attn-2.8.3%2Bcu128torch2.9-cp312-cp312-linux_x86_64.whl
 ```
@@ -29,7 +29,6 @@ uv pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/relea
 
 ```bash
 python trellis.py           # launch UI on port 7860
-python trellis.py --share   # launch with public URL
 python trellis.py --port 7861 --host 127.0.0.1
 ```
 

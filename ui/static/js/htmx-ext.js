@@ -13,7 +13,7 @@ htmx.defineExtension('sse-disable', {
     onEvent: function(name, evt) {
         // Disable buttons when SSE stream starts
         if (name === 'htmx:sseBeforeMessage' || name === 'htmx:sseOpen') {
-            const buttons = document.querySelectorAll('.option-btn, button.skip-btn, button.undo-btn');
+            const buttons = document.querySelectorAll('.option-btn, button.reject-btn, button.skip-btn, button.undo-btn');
             buttons.forEach(btn => {
                 btn.disabled = true;
                 btn.classList.add('generating');
@@ -24,7 +24,7 @@ htmx.defineExtension('sse-disable', {
         if (name === 'htmx:sseMessage') {
             const data = evt.detail;
             if (data.event === 'complete' || data.event === 'done') {
-                const buttons = document.querySelectorAll('.option-btn, button.skip-btn, button.undo-btn');
+                const buttons = document.querySelectorAll('.option-btn, button.reject-btn, button.skip-btn, button.undo-btn');
                 buttons.forEach(btn => {
                     btn.disabled = false;
                     btn.classList.remove('generating');
@@ -35,7 +35,7 @@ htmx.defineExtension('sse-disable', {
         // Handle SSE errors
         if (name === 'htmx:sseError') {
             console.error('SSE connection error:', evt.detail);
-            const buttons = document.querySelectorAll('.option-btn, button.skip-btn, button.undo-btn');
+            const buttons = document.querySelectorAll('.option-btn, button.reject-btn, button.skip-btn, button.undo-btn');
             buttons.forEach(btn => {
                 btn.disabled = false;
                 btn.classList.remove('generating');

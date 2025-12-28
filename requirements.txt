@@ -24,8 +24,6 @@ filelock==3.20.0
 flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.5.4/flash_attn-2.8.3%2Bcu128torch2.9-cp312-cp312-linux_x86_64.whl
 frozenlist==1.8.0
 fsspec==2025.9.0
-gradio==6.1.0
-gradio-client==2.0.1
 groovy==0.1.2
 h11==0.16.0
 hf-transfer==0.1.9
@@ -89,6 +87,7 @@ setuptools==80.9.0
 shellingham==1.5.4
 six==1.17.0
 starlette==0.50.0
+sse-starlette==1.6.5
 sympy==1.14.0
 tokenizers==0.22.1
 tomlkit==0.13.3
