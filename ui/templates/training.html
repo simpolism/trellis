@@ -51,6 +51,11 @@
     <p><em>Generating options...</em></p>
 </div>
 
+<div id="loading-terminal" class="loading-terminal">
+    <div id="terminal-content"></div>
+    <div class="blink-cursor"></div>
+</div>
+
 <div id="action-status" style="margin-top: 16px;"></div>
 
 <hr>
@@ -234,7 +239,12 @@ function generateOptions() {
 
     const promptDisplay = document.getElementById('prompt-display');
     const optionsContainer = document.getElementById('options-container');
+    const terminal = document.getElementById('loading-terminal');
     const actionStatus = document.getElementById('action-status');
+
+    // Reset views
+    terminal.style.display = 'none';
+    optionsContainer.style.display = 'block';
 
     // Clear previous
     actionStatus.innerHTML = '';
@@ -251,7 +261,7 @@ function generateOptions() {
     currentEventSource.addEventListener('prompt', (e) => {
         promptDisplay.innerHTML = '<strong>Prompt:</strong><br><br>' + e.data;
         promptDisplay.classList.add('prompt-flash');
-        setTimeout(() => promptDisplay.classList.remove('prompt-flash'), 600);
+        setTimeout(() => promptDisplay.classList.remove('prompt-flash'), 800);
     });
 
     currentEventSource.addEventListener('options', (e) => {
@@ -290,6 +300,10 @@ function generateOptions() {
             document.getElementById('control-display').innerText = stats.control;
             document.getElementById('control-original').innerText = stats.original_control || stats.control;
             controlContainer.style.display = 'block';
+
+            // Flash effect for update
+            controlContainer.classList.add('flash-update');
+            setTimeout(() => controlContainer.classList.remove('flash-update'), 800);
         } else {
             controlContainer.style.display = 'none';
         }
@@ -317,10 +331,58 @@ function generateOptions() {
     });
 }
 
+// Terminal Animation State
+let terminalInterval = null;
+const terminalMessages = [
+    "Locking in choice...",
+    "Computing gradients...",
+    "Backpropagating error...",
+    "Updating LoRA adapters...",
+    "Re-anchoring timeline...",
+    "Drift check complete."
+];
+
+document.body.addEventListener('htmx:beforeRequest', function(evt) {
+    // Only trigger for training actions (select/skip/undo)
+    if (evt.detail.target && evt.detail.target.id === 'action-status') {
+        const optionsContainer = document.getElementById('options-container');
+        const terminal = document.getElementById('loading-terminal');
+        const content = document.getElementById('terminal-content');
+        
+        // Switch views
+        optionsContainer.style.display = 'none';
+        terminal.style.display = 'block';
+        content.innerHTML = '';
+        
+        // Start log sequence
+        let msgIdx = 0;
+        
+        // Immediate first message
+        const addLine = (text) => {
+            const line = document.createElement('div');
+            line.className = 'terminal-line';
+            line.innerText = text;
+            content.appendChild(line);
+        };
+        
+        addLine(terminalMessages[0]);
+        msgIdx++;
+        
+        if (terminalInterval) clearInterval(terminalInterval);
+        terminalInterval = setInterval(() => {
+            if (msgIdx < terminalMessages.length) {
+                addLine(terminalMessages[msgIdx]);
+                msgIdx++;
+            }
+        }, 600);
+    }
+});
+
 // Auto-advance after any HTMX action that targets #action-status
 // (select option, reject all, skip - undo uses fetch, not HTMX)
 document.body.addEventListener('htmx:afterSwap', function (evt) {
     if (evt.detail.target && evt.detail.target.id === 'action-status') {
+        if (terminalInterval) clearInterval(terminalInterval);
         generateOptions();
     }
 });

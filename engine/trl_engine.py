@@ -170,14 +170,14 @@ class TRLEngine(BaseEngine):
             return
         self.model.train()
 
-    def _build_inputs(self, prompt: str) -> tuple[torch.Tensor, int, str]:
+    def _build_inputs(self, prompt: str, skip_formatting: bool = False) -> tuple[torch.Tensor, int, str]:
         """Construct input ids with optional think tag and return prompt length."""
-        formatted_prompt = self._format_prompt(prompt)
+        formatted_prompt = self._format_prompt(prompt) if not skip_formatting else prompt
 
         if self.config.use_chat_template:
             self._ensure_chat_template()
             messages = []
-            if self.config.system_prompt:
+            if self.config.system_prompt and not skip_formatting:
                 messages.append({"role": "system", "content": self.config.system_prompt})
             messages.append({"role": "user", "content": formatted_prompt})
 
@@ -207,14 +207,14 @@ class TRLEngine(BaseEngine):
         prompt_len = inputs.shape[1]
         return inputs, prompt_len, formatted_prompt
 
-    def generate_options(self, prompt: str) -> list[str]:
+    def generate_options(self, prompt: str, skip_formatting: bool = False) -> list[str]:
         """Generate GROUP_SIZE continuations for the given prompt."""
         if self.model is None:
             raise RuntimeError("Model not loaded")
 
         self._set_inference_mode()
 
-        inputs, prompt_len, _ = self._build_inputs(prompt)
+        inputs, prompt_len, _ = self._build_inputs(prompt, skip_formatting=skip_formatting)
 
         with torch.no_grad():
             sequences = self.model.generate(

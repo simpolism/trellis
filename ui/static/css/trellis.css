@@ -392,6 +392,66 @@ label {
     display: inline-block;
 }
 
+/* ========== Loading Terminal ========== */
+.loading-terminal {
+    display: none;
+    background-color: var(--black);
+    color: #4df14d; /* Much brighter green */
+    font-family: "IBM Plex Mono", monospace;
+    padding: 20px;
+    margin-top: 16px;
+    border: 2px solid #4df14d;
+    box-shadow: 4px 4px 0 var(--shadow);
+    min-height: 150px;
+}
+---
+/* Prompt flash animation */
+@keyframes prompt-flash {
+    0%, 100% { background-color: var(--white); }
+    50% { background-color: var(--trellis-green-pale); }
+}
+
+@keyframes flash-update {
+    0%, 100% { background-color: var(--white); }
+    0% { background-color: #e8f5e8; border-color: #4df14d; }
+    100% { background-color: #f0f4f8; }
+}
+
+.flash-update {
+    animation: flash-update 0.8s ease-out;
+}
+
+.prompt-flash {
+    animation: prompt-flash 0.6s ease-in-out;
+}
+
+.terminal-line {
+    margin: 4px 0;
+    opacity: 0;
+    animation: fadeIn 0.1s forwards;
+}
+
+.terminal-line::before {
+    content: "> ";
+    color: var(--gray-mid);
+}
+
+@keyframes fadeIn {
+    to { opacity: 1; }
+}
+
+.blink-cursor::after {
+    content: "▋";
+    animation: blink 1s step-end infinite;
+    color: var(--trellis-green);
+    margin-left: 4px;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
 /* ========== Mobile Responsive ========== */
 @media (max-width: 768px) {
     main {

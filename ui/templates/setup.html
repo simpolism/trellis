@@ -28,6 +28,9 @@
     <button class="primary" onclick="resumeSession()">
         Resume Session Now
     </button>
+    <button class="secondary" onclick="cloneSettings()">
+        Clone Settings
+    </button>
     {% else %}
     <p><em>No existing sessions found. Start a new session below.</em></p>
     {% endif %}
@@ -35,6 +38,65 @@
     <div id="resume-status" style="margin-top: 8px;"></div>
 
     <script>
+    function cloneSettings() {
+        const sessionSelect = document.getElementById('session-select');
+        const sessionPath = sessionSelect.value;
+
+        if (!sessionPath) {
+            document.getElementById('resume-status').innerHTML =
+                '<p style="color: var(--danger);">Please select a session first</p>';
+            return;
+        }
+
+        fetch(`/setup/session-config?session_path=${encodeURIComponent(sessionPath)}`)
+        .then(response => response.json())
+        .then(config => {
+            if (config.error) {
+                throw new Error(config.error);
+            }
+            
+            // Populate fields
+            document.getElementById('model-name').value = config.model_name || '';
+            document.getElementById('context-length').value = config.max_seq_length || 4096;
+            document.getElementById('group-size').value = config.group_size || 4;
+            document.getElementById('learning-rate').value = config.learning_rate || 2e-5;
+            document.getElementById('kl-beta').value = config.kl_beta || 0.03;
+            document.getElementById('temperature').value = config.temperature || 1.2;
+            document.getElementById('max-new-tokens').value = config.max_new_tokens || 256;
+            document.getElementById('lora-rank').value = config.lora_rank || 16;
+            document.getElementById('lora-alpha').value = config.lora_alpha || 16;
+            document.getElementById('max-undos').value = config.max_undos || '';
+            document.getElementById('checkpoint-interval').value = config.checkpoint_interval || 1;
+            document.getElementById('system-prompt').value = config.system_prompt || '';
+            document.getElementById('prompt-prefix').value = config.prompt_prefix || '';
+            document.getElementById('prompt-suffix').value = config.prompt_suffix || '';
+            document.getElementById('dataset-id').value = config.default_dataset || '';
+            document.getElementById('control-prompt').value = config.control_prompt || '';
+            
+            // Checkboxes
+            document.getElementById('append-think-tag').checked = config.append_think_tag !== false;
+            document.getElementById('use-chat-template').checked = config.use_chat_template !== false;
+            
+            // Precision logic
+            if (config.load_in_8bit) {
+                document.getElementById('precision').value = "8-bit";
+            } else if (config.load_in_4bit) {
+                document.getElementById('precision').value = "4-bit";
+            } else {
+                document.getElementById('precision').value = "16-bit";
+            }
+
+            document.getElementById('resume-status').innerHTML = '<p style="color: var(--trellis-green);">✅ Settings loaded!</p>';
+            
+            // Scroll down to review
+            document.getElementById('model-name').scrollIntoView({ behavior: 'smooth' });
+        })
+        .catch(error => {
+            document.getElementById('resume-status').innerHTML = 
+                '<p style="color: var(--danger);">Error loading settings: ' + error.message + '</p>';
+        });
+    }
+
     function resumeSession() {
         const sessionSelect = document.getElementById('session-select');
         const sessionPath = sessionSelect.value;
@@ -401,52 +463,45 @@
 
 <!-- System Prompt Section -->
 <div class="card">
-    <h3>System Prompt & Wrapping (Advanced)</h3>
-    <details>
-        <summary style="cursor: pointer; font-weight: 600; padding: 8px 0;">
-            Show Advanced Options
-        </summary>
-        <div style="margin-top: 12px;">
-            <p><em>Customize how prompts are formatted before being sent to the model. Most users can leave these blank.</em></p>
+    <h3>System Prompt & Wrapping</h3>
+    <p><em>Customize how prompts are formatted before being sent to the model. Most users can leave these blank.</em></p>
 
-            <div class="form-group">
-                <label for="system-prompt">System Prompt (optional)</label>
-                <textarea id="system-prompt"
-                          name="system_prompt"
-                          rows="3"
-                          placeholder="Custom system prompt for the model..."></textarea>
-                <div class="info-text">Sets the model's role or persona</div>
-            </div>
+    <div class="form-group">
+        <label for="system-prompt">System Prompt (optional)</label>
+        <textarea id="system-prompt"
+                    name="system_prompt"
+                    rows="3"
+                    placeholder="Custom system prompt for the model..."></textarea>
+        <div class="info-text">Sets the model's role or persona</div>
+    </div>
 
-            <div style="display: flex; gap: 16px;">
-                <div class="form-group" style="flex: 1;">
-                    <label for="prompt-prefix">Prompt Prefix</label>
-                    <input type="text"
-                           id="prompt-prefix"
-                           name="prompt_prefix"
-                           placeholder="Added before each prompt">
-                </div>
-                <div class="form-group" style="flex: 1;">
-                    <label for="prompt-suffix">Prompt Suffix</label>
-                    <input type="text"
-                           id="prompt-suffix"
-                           name="prompt_suffix"
-                           placeholder="Added after each prompt">
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label>
-                    <input type="checkbox"
-                           id="append-think-tag"
-                           name="append_think_tag"
-                           checked>
-                    Append &lt;think&gt; to assistant prompt
-                </label>
-                <div class="info-text">Enable to automatically prepend &lt;think&gt; so responses start with a reasoning tag.</div>
-            </div>
+    <div style="display: flex; gap: 16px;">
+        <div class="form-group" style="flex: 1;">
+            <label for="prompt-prefix">Prompt Prefix</label>
+            <input type="text"
+                    id="prompt-prefix"
+                    name="prompt_prefix"
+                    placeholder="Added before each prompt">
         </div>
-    </details>
+        <div class="form-group" style="flex: 1;">
+            <label for="prompt-suffix">Prompt Suffix</label>
+            <input type="text"
+                    id="prompt-suffix"
+                    name="prompt_suffix"
+                    placeholder="Added after each prompt">
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox"
+                    id="append-think-tag"
+                    name="append_think_tag"
+                    >
+            Append &lt;think&gt; to assistant prompt
+        </label>
+        <div class="info-text">Enable to automatically prepend &lt;think&gt; so responses start with a reasoning tag.</div>
+    </div>
 </div>
 
 <hr>
@@ -464,6 +519,9 @@
 
 <script>
 function startTrainingSession() {
+    // Save to local storage first
+    saveConfig();
+
     // Collect all form values
     const formData = new URLSearchParams();
     formData.append('model_name', document.getElementById('model-name').value);
@@ -544,6 +602,86 @@ function startTrainingSession() {
         statusDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + error.message + '</p>';
     });
 }
+
+// ========== LocalStorage Persistence ==========
+
+function saveConfig() {
+    const config = {
+        model_name: document.getElementById('model-name').value,
+        context_length: document.getElementById('context-length').value,
+        group_size: document.getElementById('group-size').value,
+        learning_rate: document.getElementById('learning-rate').value,
+        kl_beta: document.getElementById('kl-beta').value,
+        temperature: document.getElementById('temperature').value,
+        max_new_tokens: document.getElementById('max-new-tokens').value,
+        lora_rank: document.getElementById('lora-rank').value,
+        lora_alpha: document.getElementById('lora-alpha').value,
+        max_undos: document.getElementById('max-undos').value,
+        checkpoint_interval: document.getElementById('checkpoint-interval').value,
+        system_prompt: document.getElementById('system-prompt').value,
+        prompt_prefix: document.getElementById('prompt-prefix').value,
+        prompt_suffix: document.getElementById('prompt-suffix').value,
+        dataset_id: document.getElementById('dataset-id').value,
+        dataset_subset: document.getElementById('dataset-subset').value,
+        dataset_split: document.getElementById('dataset-split').value,
+        dataset_column: document.getElementById('dataset-column').value,
+        control_prompt: document.getElementById('control-prompt').value,
+        precision: document.getElementById('precision').value,
+        engine: document.getElementById('engine').value,
+        append_think_tag: document.getElementById('append-think-tag').checked,
+        use_chat_template: document.getElementById('use-chat-template').checked
+    };
+    localStorage.setItem('trellis_setup_config', JSON.stringify(config));
+}
+
+function restoreConfig() {
+    const saved = localStorage.getItem('trellis_setup_config');
+    if (!saved) return;
+
+    try {
+        const config = JSON.parse(saved);
+        
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && val !== undefined) el.value = val;
+        };
+        const setCheck = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && val !== undefined) el.checked = val;
+        };
+
+        setVal('model-name', config.model_name);
+        setVal('context-length', config.context_length);
+        setVal('group-size', config.group_size);
+        setVal('learning-rate', config.learning_rate);
+        setVal('kl-beta', config.kl_beta);
+        setVal('temperature', config.temperature);
+        setVal('max-new-tokens', config.max_new_tokens);
+        setVal('lora-rank', config.lora_rank);
+        setVal('lora-alpha', config.lora_alpha);
+        setVal('max-undos', config.max_undos);
+        setVal('checkpoint-interval', config.checkpoint_interval);
+        setVal('system-prompt', config.system_prompt);
+        setVal('prompt-prefix', config.prompt_prefix);
+        setVal('prompt-suffix', config.prompt_suffix);
+        setVal('dataset-id', config.dataset_id);
+        setVal('dataset-subset', config.dataset_subset);
+        setVal('dataset-split', config.dataset_split);
+        setVal('dataset-column', config.dataset_column);
+        setVal('control_prompt', config.control_prompt);
+        setVal('precision', config.precision);
+        setVal('engine', config.engine);
+        
+        setCheck('append-think-tag', config.append_think_tag);
+        setCheck('use-chat-template', config.use_chat_template);
+        
+    } catch (e) {
+        console.error("Failed to restore config", e);
+    }
+}
+
+// Auto-restore on load
+document.addEventListener('DOMContentLoaded', restoreConfig);
 </script>
 
 {% endblock %}

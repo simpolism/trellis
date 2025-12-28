@@ -498,7 +498,8 @@ class TrellisApp:
             self.config.temperature = 0.1  # Low temp for stability
             self.config.group_size = 1
             
-            options = self.engine.generate_options(self.config.control_prompt)
+            # Pass skip_formatting=True to avoid prefix/suffix
+            options = self.engine.generate_options(self.config.control_prompt, skip_formatting=True)
             output = options[0] if options else ""
             
             # Restore config

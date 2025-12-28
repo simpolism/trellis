@@ -10,12 +10,23 @@ from __future__ import annotations
 from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, Form, Cookie, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from ui.session_manager import session_manager
+from state.session import load_session
 
 router = APIRouter(prefix="/setup", tags=["setup"])
+
+
+@router.get("/session-config")
+async def get_session_config(session_path: str = Query(...)):
+    """Retrieve configuration for a specific session."""
+    try:
+        _, config = load_session(session_path)
+        return JSONResponse(content=config.to_dict())
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
 
 
 def _parse_optional_int(value: Optional[str]) -> Optional[int]:
