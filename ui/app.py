@@ -522,10 +522,10 @@ class TrellisApp:
 
     def get_stats(self) -> tuple[str, str, str]:
         """Get current stats for display."""
-        step_text = f"**Step:** {self.step_count}"
+        step_text = f"Step: {self.step_count}"
         drift = self.engine.compute_drift() if self.engine else 0.0
-        drift_text = f"**Drift:** {drift:.3f}"
-        dataset_text = f"**Dataset:** {self.prompt_source.status()}"
+        drift_text = f"Drift: {drift:.3f}"
+        dataset_text = f"Dataset: {self.prompt_source.status()}"
         return step_text, drift_text, dataset_text
 
     # =========================================================================
@@ -586,7 +586,7 @@ class TrellisApp:
 
     def get_final_stats(self) -> tuple[str, str]:
         """Get final stats for review screen."""
-        steps_text = f"**Total Steps:** {self.step_count}"
+        steps_text = f"Total Steps: {self.step_count}"
         drift = self.engine.compute_drift() if self.engine else 0.0
-        drift_text = f"**Final Drift:** {drift:.3f}"
+        drift_text = f"Final Drift: {drift:.3f}"
         return steps_text, drift_text

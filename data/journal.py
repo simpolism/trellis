@@ -160,12 +160,12 @@ class Journal:
 
                 # Prompt
                 if checkpoint.prompt:
-                    lines.append("**Prompt:**")
+                    lines.append("Prompt:")
                     lines.append(f"> {prompt_preview}")
                     lines.append("")
 
                 # Choice label
-                lines.append(f"**Selected:** {checkpoint.choice}")
+                lines.append(f"Selected: {checkpoint.choice}")
                 lines.append("")
 
                 # The actual response that was chosen
@@ -173,7 +173,7 @@ class Journal:
                     response_preview = checkpoint.chosen_response[:600]
                     if len(checkpoint.chosen_response) > 600:
                         response_preview += "..."
-                    lines.append("**Response:**")
+                    lines.append("Response:")
                     lines.append("")
                     for response_line in response_preview.split('\n'):
                         lines.append(f"> {response_line}")

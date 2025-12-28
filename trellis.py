@@ -108,7 +108,7 @@ async def training_screen(request: Request, session_id: str = Cookie(None)):
     if not app_instance or not app_instance.model_loaded:
         return RedirectResponse(url="/setup")
 
-    stats = app_instance.get_stats() if hasattr(app_instance, 'get_stats') else ("**Step:** 0", "**Drift:** 0.000", "**Dataset:** Not loaded")
+    stats = app_instance.get_stats() if hasattr(app_instance, 'get_stats') else ("Step: 0", "Drift: 0.000", "Dataset: Not loaded")
     group_size = 4
     if hasattr(app_instance, "config") and app_instance.config:
         group_size = app_instance.config.group_size
@@ -133,8 +133,8 @@ async def review_screen(request: Request, session_id: str = Cookie(None)):
 
     journal = ""
     config = {}
-    steps = "**Total Steps:** 0"
-    drift = "**Final Drift:** 0.000"
+    steps = "Total Steps: 0"
+    drift = "Final Drift: 0.000"
 
     if hasattr(app_instance, 'get_journal_content'):
         journal = app_instance.get_journal_content()
