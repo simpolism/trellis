@@ -1,8 +1,8 @@
 """
-TRL/HuggingFace Engine
+Transformers Engine
 ======================
 
-Training engine using standard HuggingFace Transformers + PEFT + TRL (optional).
+Training engine using standard HuggingFace Transformers + PEFT
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from config import TrellisConfig
 
 
-class TRLEngine(BaseEngine):
+class TransformersEngine(BaseEngine):
     """
     Training engine using standard HF transformers + PEFT.
     """
@@ -52,7 +52,7 @@ class TRLEngine(BaseEngine):
 
     @property
     def name(self) -> str:
-        return "TRL (LoRA)"
+        return "Transformers (LoRA)"
 
     @property
     def is_loaded(self) -> bool:
@@ -60,7 +60,7 @@ class TRLEngine(BaseEngine):
 
     def load_model(self) -> str:
         """Initialize model, tokenizer, LoRA, optimizer."""
-        print(f"Loading model {self.config.model_name} with TRL engine...")
+        print(f"Loading model {self.config.model_name} with Transformers engine...")
 
         # Quantization Config
         bnb_config = None

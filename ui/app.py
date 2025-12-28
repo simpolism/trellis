@@ -21,7 +21,7 @@ from data.prompt_source import PromptSource
 from data.journal import Journal
 from engine.base import BaseEngine
 from engine.unsloth_engine import UnslothEngine
-from engine.trl_engine import TRLEngine
+from engine.transformers_engine import TransformersEngine
 from state.checkpoint import Checkpoint
 from state.undo_stack import LinearUndoStack
 from state.session import SessionState, load_session
@@ -62,8 +62,8 @@ class TrellisApp:
         normalized = (engine_name or "").lower()
         if "unsloth" in normalized:
             return UnslothEngine(self.config)
-        elif "trl" in normalized:
-            return TRLEngine(self.config)
+        elif "transformers" in normalized:
+            return TransformersEngine(self.config)
         raise ValueError(f"Unsupported engine: {engine_name}")
 
     # =========================================================================
