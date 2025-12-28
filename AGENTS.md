@@ -13,7 +13,7 @@
 - Isolate artifacts while testing: `python trellis.py --save-dir /tmp/trellis_sessions`
 - Use the repo virtualenv for Python (`source .venv/bin/activate`); system `python` is not available
 - Default model: `unsloth/gemma-3-1b-it-unsloth-bnb-4bit` (1B, 4096 ctx). `<think>` is auto-added to replies by default; toggle precision (16-bit vs 4-bit) and thinking in the Setup screen.
-- AGENTS.md and CLAUDE.md are hard-linked; edits to one update the other
+- AGENTS.md and CLAUDE.md and GEMINI.md are hard-linked; edits to one update the other
 
 ## Coding Style & Naming Conventions
 - Follow PEP 8 with 4-space indents and type hints; keep functions small and side-effect-light.
