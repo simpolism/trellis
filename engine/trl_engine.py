@@ -1,8 +1,8 @@
 """
-UnSloth Engine
-==============
+TRL/HuggingFace Engine
+======================
 
-Training engine using UnSloth for 4-bit or 16-bit models with LoRA.
+Training engine using standard HuggingFace Transformers + PEFT + TRL (optional).
 """
 
 from __future__ import annotations
@@ -10,12 +10,22 @@ from __future__ import annotations
 import math
 import os
 from contextlib import nullcontext
-from queue import Queue
 from threading import Thread
 from typing import TYPE_CHECKING, Optional
 
 import torch
 import torch.nn.functional as F
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+)
+from peft import (
+    LoraConfig,
+    get_peft_model,
+    prepare_model_for_kbit_training,
+    PeftModel,
+)
 
 from .base import BaseEngine
 from .utils import BatchedTextStreamer
@@ -24,9 +34,9 @@ if TYPE_CHECKING:
     from config import TrellisConfig
 
 
-class UnslothEngine(BaseEngine):
+class TRLEngine(BaseEngine):
     """
-    Training engine using UnSloth for efficient 4-bit inference and LoRA training.
+    Training engine using standard HF transformers + PEFT.
     """
 
     def __init__(self, config: "TrellisConfig"):
@@ -42,7 +52,7 @@ class UnslothEngine(BaseEngine):
 
     @property
     def name(self) -> str:
-        return "UnSloth (LoRA)"
+        return "TRL (LoRA)"
 
     @property
     def is_loaded(self) -> bool:
@@ -50,38 +60,61 @@ class UnslothEngine(BaseEngine):
 
     def load_model(self) -> str:
         """Initialize model, tokenizer, LoRA, optimizer."""
-        from unsloth import FastLanguageModel
+        print(f"Loading model {self.config.model_name} with TRL engine...")
 
-        print("Loading model...")
+        # Quantization Config
+        bnb_config = None
+        torch_dtype = torch.float16
+        
+        if self.config.load_in_4bit:
+            print("Using 4-bit quantization (BitsAndBytes)")
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=False,
+            )
+        else:
+             if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                 torch_dtype = torch.bfloat16
 
-        dtype = None
-        if not self.config.load_in_4bit:
-            dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+        # Load Tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.config.model_name,
+            trust_remote_code=True,
+        )
+        self._ensure_pad_token()
 
-        self.model, self.tokenizer = FastLanguageModel.from_pretrained(
-            model_name=self.config.model_name,
-            max_seq_length=self.config.max_seq_length,
-            dtype=dtype,
-            load_in_4bit=self.config.load_in_4bit,
+        # Load Model
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.config.model_name,
+            quantization_config=bnb_config,
+            torch_dtype=torch_dtype,
+            device_map="auto" if self.device == "cuda" else None,
+            trust_remote_code=True,
         )
 
-        self.model = FastLanguageModel.get_peft_model(
-            self.model,
+        if self.config.load_in_4bit:
+            self.model = prepare_model_for_kbit_training(self.model)
+
+        # Setup LoRA
+        peft_config = LoraConfig(
             r=self.config.lora_rank,
-            target_modules=list(self.config.lora_target_modules),
             lora_alpha=self.config.lora_alpha,
             lora_dropout=self.config.lora_dropout,
             bias="none",
-            use_gradient_checkpointing="unsloth",
-            random_state=3407,
+            task_type="CAUSAL_LM",
+            target_modules=list(self.config.lora_target_modules),
         )
 
-        self._ensure_pad_token()
+        self.model = get_peft_model(self.model, peft_config)
+        self.model.print_trainable_parameters()
 
         # Persistent optimizer
-        trainable = [p for p in self.model.parameters() if p.requires_grad]
+        # Only optimize parameters that require gradients (LoRA)
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
         self.optimizer = torch.optim.AdamW(
-            trainable,
+            trainable_params,
             lr=self.config.learning_rate,
             weight_decay=self.config.weight_decay,
         )
@@ -93,25 +126,28 @@ class UnslothEngine(BaseEngine):
     def _ensure_pad_token(self):
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        # Also ensure padding side is right (usually) but for generation left is better.
+        # However, for training/batched inference standardizing is key.
+        self.tokenizer.padding_side = "left"
 
     def _ensure_chat_template(self):
-        """Provide a default Qwen-style chat template if missing."""
+        """Provide a default chat template if missing."""
         if getattr(self.tokenizer, "chat_template", None):
             return
+        # Simple fallback template
         self.tokenizer.chat_template = (
             "{% for message in messages %}"
             "{% if message['role'] == 'user' %}"
-            "<|im_start|>user\n{{ message['content'] }}<|im_end|>\n"
+            "User: {{ message['content'] }}\\n"
             "{% elif message['role'] == 'assistant' %}"
-            "<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n"
+            "Assistant: {{ message['content'] }}\\n"
             "{% endif %}"
             "{% endfor %}"
-            "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
+            "{% if add_generation_prompt %}Assistant:{% endif %}"
         )
 
     def _format_prompt(self, prompt: str) -> str:
         """Apply system prompt and prefix/suffix if configured."""
-        # Apply prefix and suffix
         formatted = prompt
         if self.config.prompt_prefix:
             formatted = self.config.prompt_prefix + formatted
@@ -122,40 +158,12 @@ class UnslothEngine(BaseEngine):
     def _set_inference_mode(self) -> None:
         if self.model is None:
             return
-        if hasattr(self.model, "for_inference"):
-            self.model.for_inference()
-        else:
-            self.model.eval()
+        self.model.eval()
 
     def _set_training_mode(self) -> None:
         if self.model is None:
             return
-        if hasattr(self.model, "for_training"):
-            self.model.for_training()
-        else:
-            self.model.train()
-
-    def _get_autocast_dtype(self) -> torch.dtype:
-        if self.model is None:
-            return torch.float16
-        try:
-            from unsloth_zoo.hf_utils import dtype_from_config
-            from unsloth_zoo.utils import _get_dtype
-
-            return _get_dtype(dtype_from_config(self.model.config))
-        except Exception:
-            for param in self.model.parameters():
-                if param.is_floating_point():
-                    return param.dtype
-        return torch.float16
-
-    def _autocast_context(self):
-        if self.device != "cuda":
-            return nullcontext()
-        dtype = self._get_autocast_dtype()
-        if dtype not in (torch.float16, torch.bfloat16):
-            return nullcontext()
-        return torch.autocast(device_type="cuda", dtype=dtype)
+        self.model.train()
 
     def _build_inputs(self, prompt: str) -> tuple[torch.Tensor, int, str]:
         """Construct input ids with optional think tag and return prompt length."""
@@ -200,9 +208,12 @@ class UnslothEngine(BaseEngine):
                 inputs,
                 max_new_tokens=self.config.max_new_tokens,
                 temperature=self.config.temperature,
-                min_p=self.config.min_p,
-                num_return_sequences=self.config.group_size,
+                # min_p is supported in newer transformers, checking fallback
+                top_p=0.9 if not hasattr(self.config, 'min_p') else 1.0, 
+                # passing min_p via generation_config or kwargs if transformers supports it
+                # For safety, standard sampling:
                 do_sample=True,
+                num_return_sequences=self.config.group_size,
                 pad_token_id=self.tokenizer.pad_token_id,
             )
 
@@ -220,7 +231,7 @@ class UnslothEngine(BaseEngine):
         return (decoded + [""] * self.config.group_size)[:self.config.group_size]
 
     def generate_options_streaming(self, prompt: str):
-        """Stream GROUP_SIZE continuations in parallel without extra VRAM."""
+        """Stream GROUP_SIZE continuations in parallel."""
         if self.model is None:
             raise RuntimeError("Model not loaded")
 
@@ -229,9 +240,10 @@ class UnslothEngine(BaseEngine):
         inputs, prompt_len, _ = self._build_inputs(prompt)
 
         stop_ids: set[int] = set()
-        for tok_id in (self.tokenizer.eos_token_id, self.tokenizer.pad_token_id):
-            if tok_id is not None:
-                stop_ids.add(tok_id)
+        if self.tokenizer.eos_token_id is not None:
+            stop_ids.add(self.tokenizer.eos_token_id)
+        if self.tokenizer.pad_token_id is not None:
+            stop_ids.add(self.tokenizer.pad_token_id)
 
         streamer = BatchedTextStreamer(
             self.tokenizer,
@@ -244,12 +256,16 @@ class UnslothEngine(BaseEngine):
             "input_ids": inputs,
             "max_new_tokens": self.config.max_new_tokens,
             "temperature": self.config.temperature,
-            "min_p": self.config.min_p,
-            "num_return_sequences": self.config.group_size,
             "do_sample": True,
+            "num_return_sequences": self.config.group_size,
             "pad_token_id": self.tokenizer.pad_token_id,
             "streamer": streamer,
         }
+
+        # Handle min_p if available in config and transformers
+        if hasattr(self.config, 'min_p') and self.config.min_p > 0:
+            # Note: min_p support depends on transformers version, generally safe to pass as kwarg
+            gen_kwargs["min_p"] = self.config.min_p
 
         result = {"sequences": None}
 
@@ -289,12 +305,6 @@ class UnslothEngine(BaseEngine):
     def train_step(self, choice_idx: int) -> tuple[str, dict]:
         """
         Perform one preference update.
-
-        Args:
-            choice_idx: 0..GROUP_SIZE-1 for chosen, GROUP_SIZE for reject-all
-
-        Returns:
-            (status_message, metrics_dict)
         """
         if self.model is None or self.optimizer is None:
             raise RuntimeError("Model not loaded")
@@ -305,7 +315,7 @@ class UnslothEngine(BaseEngine):
         input_ids = self.current_batch["sequences"].to(self.device)
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
 
-        # Trim to the maximum non-padding length to avoid wasted compute/memory
+        # Trim
         lengths = attention_mask.sum(dim=1)
         max_len = int(lengths.max().item())
         max_len = max(max_len, prompt_len + 1)
@@ -317,7 +327,7 @@ class UnslothEngine(BaseEngine):
         advantages = self._compute_advantages(choice_idx)
 
         self._set_training_mode()
-        self.optimizer.zero_grad(set_to_none=True)
+        self.optimizer.zero_grad()
 
         # Policy logprobs
         seq_logp, token_logp, token_mask = self._masked_seq_logp(
@@ -329,7 +339,8 @@ class UnslothEngine(BaseEngine):
 
         # Optional KL anchor
         kl_loss = torch.tensor(0.0, device=self.device)
-        if self.config.kl_beta > 0.0 and hasattr(self.model, "disable_adapter"):
+        if self.config.kl_beta > 0.0:
+            # With PEFT, we can disable adapters contextually
             with torch.no_grad():
                 with self.model.disable_adapter():
                     _, token_logp_ref, _ = self._masked_seq_logp(
@@ -361,7 +372,6 @@ class UnslothEngine(BaseEngine):
     def _compute_advantages(self, choice_idx: int) -> torch.Tensor:
         """Convert choice index to advantage vector."""
         n = self.config.group_size
-
         if choice_idx == n:  # Reject all
             return torch.full((n,), -1.0, device=self.device)
 
@@ -373,10 +383,10 @@ class UnslothEngine(BaseEngine):
         return (rewards - mean) / std
 
     def _masked_seq_logp(
-        self,
-        model,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
+        self, 
+        model, 
+        input_ids: torch.Tensor, 
+        attention_mask: torch.Tensor, 
         prompt_len: int,
     ):
         """Compute per-sequence and per-token log-probs for continuations."""
@@ -384,8 +394,9 @@ class UnslothEngine(BaseEngine):
         labels[:, :prompt_len] = -100
         labels[attention_mask == 0] = -100
 
-        with self._autocast_context():
-            outputs = model(input_ids, attention_mask=attention_mask, use_cache=False)
+        # Run forward pass
+        # Note: PEFT models forward usually works like standard models
+        outputs = model(input_ids, attention_mask=attention_mask, use_cache=False)
         logits = outputs.logits
 
         shift_logits = logits[:, :-1, :]
@@ -404,7 +415,7 @@ class UnslothEngine(BaseEngine):
         return seq_logp, token_logp_masked, token_mask
 
     def compute_drift(self) -> float:
-        """L2 distance of LoRA weights from zero (i.e., from base model)."""
+        """L2 distance of LoRA weights from zero."""
         if self.model is None:
             return 0.0
 
@@ -423,7 +434,7 @@ class UnslothEngine(BaseEngine):
     def get_optimizer_state(self) -> dict:
         """Snapshot optimizer state (CPU)."""
         state = self.optimizer.state_dict()
-
+        # Helper to move to cpu
         def to_cpu(obj):
             if torch.is_tensor(obj):
                 return obj.cpu().clone()
@@ -432,7 +443,6 @@ class UnslothEngine(BaseEngine):
             elif isinstance(obj, list):
                 return [to_cpu(x) for x in obj]
             return obj
-
         return to_cpu(state)
 
     def restore_state(self, adapter_state: dict, optimizer_state: dict) -> None:
@@ -449,30 +459,20 @@ class UnslothEngine(BaseEngine):
                 elif isinstance(obj, list):
                     return [to_device(x) for x in obj]
                 return obj
-
             self.optimizer.load_state_dict(to_device(optimizer_state))
 
     def save_adapter(self, path: str) -> None:
-        """Save current adapter to disk in HuggingFace format."""
+        """Save current adapter to disk."""
         os.makedirs(path, exist_ok=True)
         self.model.save_pretrained(path)
 
     def merge_and_save(self, path: str) -> str:
-        """
-        Merge LoRA into base model and save full model.
-
-        Note: This temporarily increases memory usage significantly.
-        """
+        """Merge LoRA into base model and save."""
         if self.model is None:
             raise RuntimeError("Model not loaded")
 
         try:
-            # UnSloth provides a merge method
-            from unsloth import FastLanguageModel
-
             print("Merging LoRA into base model...")
-
-            # Get merged model
             merged_model = self.model.merge_and_unload()
 
             print(f"Saving merged model to {path}...")
@@ -481,6 +481,5 @@ class UnslothEngine(BaseEngine):
             self.tokenizer.save_pretrained(path)
 
             return f"Merged model saved to {path}"
-
         except Exception as e:
             return f"Error merging model: {e}"
