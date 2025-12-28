@@ -101,6 +101,8 @@ async def load_model(
     dataset_id: str = Query("abhayesian/introspection-prompts"),
     precision: str = Query("4-bit"),
     append_think_tag: bool = Query(True),
+    use_chat_template: bool = Query(True),
+    control_prompt: str = Query(""),
     session_id: str = Cookie(None),
 ):
     """Load model with SSE status streaming."""
@@ -127,6 +129,8 @@ async def load_model(
                 dataset_id=dataset_id,
                 precision_choice=precision,
                 append_think_tag=append_think_tag,
+                use_chat_template=use_chat_template,
+                control_prompt=control_prompt,
             ):
                 yield {"event": "message", "data": status}
 
@@ -198,6 +202,9 @@ async def start_training(
     dataset_column: str = Form("text"),
     precision: str = Form("4-bit"),
     append_think_tag: bool = Form(True),
+    use_chat_template: bool = Form(True),
+    checkpoint_interval: int = Form(1),
+    control_prompt: str = Form(""),
     session_id: str = Cookie(None),
 ):
     """Start training session with SSE status streaming."""
@@ -227,6 +234,9 @@ async def start_training(
                 dataset_column=dataset_column if dataset_column else None,
                 precision_choice=precision,
                 append_think_tag=append_think_tag,
+                use_chat_template=use_chat_template,
+                checkpoint_interval=checkpoint_interval,
+                control_prompt=control_prompt,
             ):
                 yield {"event": "message", "data": status}
 

@@ -124,12 +124,15 @@ class TrellisApp:
         dataset_id: str,
         precision_choice: str,
         append_think_tag: bool,
+        use_chat_template: bool = True,
+        control_prompt: str = "",
     ):
         """Load model without starting training session. Yields status updates."""
         _log(f"Loading model: {model_name}")
         yield "Loading model (this may take a minute)..."
 
         load_in_4bit = "4-bit" in (precision_choice or "").lower()
+        load_in_8bit = "8-bit" in (precision_choice or "").lower()
 
         # Build config
         self.config = TrellisConfig(
@@ -148,7 +151,10 @@ class TrellisApp:
             prompt_prefix=prompt_prefix,
             prompt_suffix=prompt_suffix,
             load_in_4bit=load_in_4bit,
+            load_in_8bit=load_in_8bit,
             append_think_tag=append_think_tag,
+            use_chat_template=use_chat_template,
+            control_prompt=control_prompt if control_prompt else None,
         )
 
         # Initialize engine
@@ -181,12 +187,16 @@ class TrellisApp:
         dataset_column: str,
         precision_choice: str,
         append_think_tag: bool,
+        use_chat_template: bool = True,
+        checkpoint_interval: int = 1,
+        control_prompt: str = "",
     ):
         """Initialize training session. Yields status updates."""
         _log("Initializing training session...")
         yield "Initializing session..."
 
         load_in_4bit = "4-bit" in (precision_choice or "").lower()
+        load_in_8bit = "8-bit" in (precision_choice or "").lower()
 
         # Create session directory
         session_name = SessionState.generate_session_name()
@@ -211,7 +221,11 @@ class TrellisApp:
             prompt_prefix=prompt_prefix,
             prompt_suffix=prompt_suffix,
             load_in_4bit=load_in_4bit,
+            load_in_8bit=load_in_8bit,
             append_think_tag=append_think_tag,
+            use_chat_template=use_chat_template,
+            checkpoint_interval=int(checkpoint_interval),
+            control_prompt=control_prompt if control_prompt else None,
         )
 
         # Save config
@@ -293,6 +307,11 @@ class TrellisApp:
         _log("Session initialized")
         _log(f"Model: {self.config.model_name}")
         _log(f"Dataset: {self.prompt_source.dataset_id} ({self.prompt_source.total()} prompts)")
+
+        # Initial control pass
+        if self.config.control_prompt:
+            yield "Running initial control pass..."
+            self._run_control_pass()
 
         yield "Ready!"
 
@@ -422,18 +441,20 @@ class TrellisApp:
                     drift,
                 )
 
-        # Create checkpoint
-        checkpoint = Checkpoint.create(
-            step_count=self.step_count,
-            prompt=self.current_prompt,
-            choice=choice_label,
-            chosen_response=chosen_response,
-            options=self.current_options.copy(),
-            drift_from_base=drift,
-            adapter_state=self.engine.get_adapter_state(),
-            optimizer_state=self.engine.get_optimizer_state(),
-        )
-        self.undo_stack.push(checkpoint)
+        # Create checkpoint if interval matches
+        interval = self.config.checkpoint_interval if self.config else 1
+        if self.step_count % interval == 0:
+            checkpoint = Checkpoint.create(
+                step_count=self.step_count,
+                prompt=self.current_prompt,
+                choice=choice_label,
+                chosen_response=chosen_response,
+                options=self.current_options.copy(),
+                drift_from_base=drift,
+                adapter_state=self.engine.get_adapter_state(),
+                optimizer_state=self.engine.get_optimizer_state(),
+            )
+            self.undo_stack.push(checkpoint)
 
         # Update session state
         if self.session_state:
@@ -456,7 +477,41 @@ class TrellisApp:
         except Exception:
             pass
 
+        # Run control pass if configured
+        if self.config.control_prompt:
+            self._run_control_pass()
+
         return status, {"step": self.step_count, "drift": drift, **metrics}
+
+    def _run_control_pass(self):
+        """Run inference on the control prompt and save result."""
+        if not self.engine or not self.config.control_prompt:
+            return
+
+        _log("Running control pass...")
+        try:
+            # Generate single option with greedy decoding (temperature=0 or very low)
+            # We temporarily override config params for stability
+            original_temp = self.config.temperature
+            original_group = self.config.group_size
+            
+            self.config.temperature = 0.1  # Low temp for stability
+            self.config.group_size = 1
+            
+            options = self.engine.generate_options(self.config.control_prompt)
+            output = options[0] if options else ""
+            
+            # Restore config
+            self.config.temperature = original_temp
+            self.config.group_size = original_group
+            
+            if self.session_state:
+                self.session_state.update_control_history(self.step_count, output)
+                self.session_state.save(self.session_dir / "session.json")
+                
+            _log(f"Control pass complete")
+        except Exception as e:
+            _log(f"Control pass failed: {e}")
 
     def skip_prompt(self) -> str:
         """Skip current prompt without training."""

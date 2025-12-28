@@ -183,6 +183,17 @@
         </div>
     </div>
 
+    <div class="form-group">
+        <label>
+            <input type="checkbox"
+                   id="use-chat-template"
+                   name="use_chat_template"
+                   checked>
+            Use Chat Template
+        </label>
+        <div class="info-text">Disable for base models (e.g., Trinity-Nano-Base)</div>
+    </div>
+
     <button class="secondary" onclick="connectModelLoading()">Load Model</button>
 
     <div id="model-status" style="margin-top: 8px;"></div>
@@ -212,6 +223,8 @@
         params.set('dataset_id', document.getElementById('dataset-id').value);
         params.set('precision', precision);
         params.set('append_think_tag', document.getElementById('append-think-tag').checked);
+        params.set('use_chat_template', document.getElementById('use-chat-template').checked);
+        params.set('control_prompt', document.getElementById('control-prompt').value || '');
         const url = `/setup/load-model?${params.toString()}`;
 
         const statusDiv = document.getElementById('model-status');
@@ -254,9 +267,10 @@
         <label for="precision">Precision</label>
         <select id="precision" name="precision">
             <option value="4-bit" selected>4-bit (recommended default)</option>
+            <option value="8-bit">8-bit (balanced)</option>
             <option value="16-bit">16-bit (best quality, high VRAM)</option>
         </select>
-        <div class="info-text">16-bit trains best; switch to 4-bit if VRAM is tight.</div>
+        <div class="info-text">16-bit trains best; switch to 4-bit/8-bit if VRAM is tight.</div>
     </div>
 
     <h4>Generation Settings</h4>
@@ -353,7 +367,34 @@
                min="1">
         <div class="info-text">Leave blank for unlimited (recommended for short sessions)</div>
     </div>
+
+    <div class="form-group">
+        <label for="checkpoint-interval">Checkpoint Every N Steps</label>
+        <input type="number"
+               id="checkpoint-interval"
+               name="checkpoint_interval"
+               value="1"
+               min="1">
+        <div class="info-text">Save a checkpoint every N steps to reduce disk usage.</div>
+    </div>
     <p><em>Each checkpoint uses ~500MB for an 8B model. Unlimited checkpoints recommended for sessions under 50 steps.</em></p>
+</div>
+
+<hr>
+
+<!-- Validation Section -->
+<div class="card">
+    <h3>Validation & Monitoring</h3>
+    <p><em>Track model behavior on a specific prompt throughout training.</em></p>
+
+    <div class="form-group">
+        <label for="control-prompt">Control Prompt (optional)</label>
+        <textarea id="control-prompt"
+                  name="control_prompt"
+                  rows="2"
+                  placeholder="e.g., 'Explain the concept of love.' or 'Who are you?'"></textarea>
+        <div class="info-text">The model will generate a response to this prompt after every training step, allowing you to monitor drift or behavioral changes.</div>
+    </div>
 </div>
 
 <hr>
@@ -445,6 +486,9 @@ function startTrainingSession() {
     formData.append('dataset_column', document.getElementById('dataset-column').value || '');
     formData.append('precision', document.getElementById('precision').value);
     formData.append('append_think_tag', document.getElementById('append-think-tag').checked);
+    formData.append('use_chat_template', document.getElementById('use-chat-template').checked);
+    formData.append('checkpoint_interval', document.getElementById('checkpoint-interval').value);
+    formData.append('control_prompt', document.getElementById('control-prompt').value || '');
 
     const statusDiv = document.getElementById('go-status');
     statusDiv.innerHTML = '<p><em>Starting training session...</em></p>';

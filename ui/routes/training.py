@@ -58,6 +58,28 @@ async def generate_options(session_id: str = Cookie(None)):
             # Send prompt immediately
             yield {"event": "prompt", "data": prompt}
 
+            # Get updated stats and control info immediately
+            stats = app.get_stats()
+            
+            control_output = ""
+            original_control = ""
+            if app.session_state and app.session_state.control_history:
+                # Normalize keys to int
+                history = {int(k): v for k, v in app.session_state.control_history.items()}
+                steps = sorted(history.keys())
+                if steps:
+                    control_output = history[steps[-1]]
+                    # Get original (step 0 or first available)
+                    original_control = history[steps[0]]
+
+            yield {"event": "stats", "data": json.dumps({
+                "step": stats[0],
+                "drift": stats[1],
+                "dataset": stats[2],
+                "control": control_output,
+                "original_control": original_control,
+            })}
+
             # Stream options as they generate
             if hasattr(app.engine, "generate_options_streaming"):
                 for options in app.engine.generate_options_streaming(prompt):
@@ -72,14 +94,6 @@ async def generate_options(session_id: str = Cookie(None)):
             # Log to journal
             if app.journal:
                 app.journal.log_generation(prompt, len(app.current_options))
-
-            # Get updated stats
-            stats = app.get_stats()
-            yield {"event": "stats", "data": json.dumps({
-                "step": stats[0],
-                "drift": stats[1],
-                "dataset": stats[2],
-            })}
 
             yield {"event": "complete", "data": ""}
 
@@ -157,6 +171,14 @@ async def undo(session_id: str = Cookie(None)):
         # Get stats after undo
         stats = app.get_stats()
 
+        control_output = ""
+        if app.session_state and app.session_state.control_history:
+            # Normalize keys to int
+            history = {int(k): v for k, v in app.session_state.control_history.items()}
+            steps = sorted(history.keys())
+            if steps:
+                control_output = history[steps[-1]]
+
         # Return HTML fragment with restored state
         html = f"""
         <div>
@@ -165,6 +187,13 @@ async def undo(session_id: str = Cookie(None)):
                 <div>{stats[1]}</div>
                 <div>{stats[2]}</div>
             </div>
+            
+            <div id="control-container" class="card" 
+                 style="display: {'block' if control_output else 'none'}; background: #f0f4f8; border-color: #d1e1f0; margin-top: 16px;">
+                <strong>Control Response:</strong>
+                <p id="control-display" style="margin-top: 8px; font-family: monospace; white-space: pre-wrap;">{control_output}</p>
+            </div>
+
             <hr>
             <div class="prompt-card">
                 <strong>Prompt:</strong><br><br>
@@ -173,6 +202,7 @@ async def undo(session_id: str = Cookie(None)):
             <hr>
             <div id="options-container">
                 <h3>Select your preference:</h3>
+                <div class="options-grid">
         """
 
         # Add option cards
@@ -184,7 +214,7 @@ async def undo(session_id: str = Cookie(None)):
                 html += f"""
                 <div class="option-group">
                     <div class="option-header">{label}</div>
-                    <div class="option-text">{option}</div>
+                    <div class="option-text" style="flex: 1;">{option}</div>
                     <button class="option-btn primary"
                             hx-post="/training/select-option/{i}"
                             hx-target="#action-status"
@@ -195,6 +225,7 @@ async def undo(session_id: str = Cookie(None)):
                 """
 
         html += """
+                </div>
             </div>
             <div id="action-status" style="margin-top: 16px; color: var(--trellis-green); font-weight: 600;">
                 ↩️ """ + status + """
@@ -224,7 +255,7 @@ async def edit_prompt(
         prompt, options = app.apply_edited_prompt(new_prompt)
 
         # Return HTML fragment with new options
-        html = "<h3>Select your preference:</h3>"
+        html = '<h3>Select your preference:</h3><div class="options-grid">'
         group_size = _get_group_size(app)
         option_count = min(len(options), group_size)
         for i, option in enumerate(options[:option_count]):
@@ -232,7 +263,7 @@ async def edit_prompt(
             html += f"""
             <div class="option-group">
                 <div class="option-header">{label}</div>
-                <div class="option-text">{option}</div>
+                <div class="option-text" style="flex: 1;">{option}</div>
                 <button class="option-btn primary"
                         hx-post="/training/select-option/{i}"
                         hx-target="#action-status"
@@ -241,6 +272,7 @@ async def edit_prompt(
                 </button>
             </div>
             """
+        html += '</div>'
 
         response = HTMLResponse(content=html)
         _attach_session_cookie(response, session_id, created)

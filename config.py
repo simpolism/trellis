@@ -20,6 +20,8 @@ class TrellisConfig:
     model_name: str = "unsloth/gemma-3-1b-it-unsloth-bnb-4bit"
     max_seq_length: int = 4096
     load_in_4bit: bool = True
+    load_in_8bit: bool = False
+    use_chat_template: bool = True
     append_think_tag: bool = True
     think_tag: str = "<think>"
 
@@ -45,6 +47,7 @@ class TrellisConfig:
 
     # Undo settings
     max_undos: Optional[int] = None  # None = unlimited (will warn about disk usage)
+    checkpoint_interval: int = 1  # Save checkpoint every N steps
 
     # Paths
     save_dir: str = "./trellis_sessions"
@@ -57,6 +60,7 @@ class TrellisConfig:
     system_prompt: Optional[str] = None
     prompt_prefix: str = ""
     prompt_suffix: str = ""
+    control_prompt: Optional[str] = None
 
     def save(self, path: str) -> None:
         """Save configuration to JSON file."""

@@ -54,6 +54,7 @@ class SessionState:
 
     # Training state
     current_step: int = 0
+    control_history: dict[int, str] = None  # Step -> Output map
 
     @classmethod
     def create_new(cls, session_dir: Path, config: TrellisConfig, engine_name: Optional[str] = None) -> "SessionState":
@@ -74,6 +75,7 @@ class SessionState:
             created_at=now,
             last_modified=now,
             engine_name=engine_name,
+            control_history={},
         )
 
         state.save(session_dir / "session.json")
@@ -110,6 +112,12 @@ class SessionState:
     def update_step(self, step: int) -> None:
         """Update current training step."""
         self.current_step = step
+
+    def update_control_history(self, step: int, output: str) -> None:
+        """Update control prompt history."""
+        if self.control_history is None:
+            self.control_history = {}
+        self.control_history[step] = output
 
     @staticmethod
     def discover_sessions(base_dir: str) -> list[tuple[str, "SessionState", str]]:

@@ -9,6 +9,24 @@
     <div id="dataset-info">{{ dataset }}</div>
 </div>
 
+<div id="control-container" class="card" 
+     style="display: {% if control_response %}block{% else %}none{% endif %}; background: #f0f4f8; border-color: #d1e1f0;">
+    <div style="margin-bottom: 12px; border-bottom: 1px solid #d1e1f0; padding-bottom: 8px;">
+        <strong style="color: #555;">Control Prompt:</strong>
+        <div style="font-style: italic; margin-top: 4px;">{{ control_prompt }}</div>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div>
+            <strong>Original (Step 0):</strong>
+            <p id="control-original" style="margin-top: 8px; font-family: monospace; white-space: pre-wrap; font-size: 13px; color: #555;">{{ original_control_response }}</p>
+        </div>
+        <div style="border-left: 1px solid #d1e1f0; padding-left: 16px;">
+            <strong>Current:</strong>
+            <p id="control-display" style="margin-top: 8px; font-family: monospace; white-space: pre-wrap; font-size: 13px;">{{ control_response }}</p>
+        </div>
+    </div>
+</div>
+
 <hr>
 
 <h2>Training</h2>
@@ -238,14 +256,14 @@ function generateOptions() {
 
     currentEventSource.addEventListener('options', (e) => {
         const options = JSON.parse(e.data);
-        let html = '<h3>Select your preference:</h3>';
+        let html = '<h3>Select your preference:</h3><div class="options-grid">';
 
         options.slice(0, groupSize).forEach((option, i) => {
             const label = String.fromCharCode(65 + i);
             html += `
                 <div class="option-group">
                     <div class="option-header">${label}</div>
-                    <div class="option-text">${option}</div>
+                    <div class="option-text" style="flex: 1;">${option}</div>
                     <button class="option-btn primary"
                             hx-post="/training/select-option/${i}"
                             hx-target="#action-status"
@@ -256,6 +274,7 @@ function generateOptions() {
             `;
         });
 
+        html += '</div>';
         optionsContainer.innerHTML = html;
         htmx.process(optionsContainer);
     });
@@ -265,6 +284,15 @@ function generateOptions() {
         document.getElementById('step-display').innerHTML = stats.step;
         document.getElementById('drift-display').innerHTML = stats.drift;
         document.getElementById('dataset-info').innerHTML = stats.dataset;
+        
+        const controlContainer = document.getElementById('control-container');
+        if (stats.control) {
+            document.getElementById('control-display').innerText = stats.control;
+            document.getElementById('control-original').innerText = stats.original_control || stats.control;
+            controlContainer.style.display = 'block';
+        } else {
+            controlContainer.style.display = 'none';
+        }
     });
 
     currentEventSource.addEventListener('complete', () => {

@@ -159,20 +159,28 @@ class UnslothEngine(BaseEngine):
 
     def _build_inputs(self, prompt: str) -> tuple[torch.Tensor, int, str]:
         """Construct input ids with optional think tag and return prompt length."""
-        self._ensure_chat_template()
         formatted_prompt = self._format_prompt(prompt)
 
-        messages = []
-        if self.config.system_prompt:
-            messages.append({"role": "system", "content": self.config.system_prompt})
-        messages.append({"role": "user", "content": formatted_prompt})
+        if self.config.use_chat_template:
+            self._ensure_chat_template()
+            messages = []
+            if self.config.system_prompt:
+                messages.append({"role": "system", "content": self.config.system_prompt})
+            messages.append({"role": "user", "content": formatted_prompt})
 
-        inputs = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_tensors="pt",
-        ).to(self.device)
+            inputs = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_tensors="pt",
+            ).to(self.device)
+        else:
+            # Base model mode: just tokenize the formatted prompt directly
+            inputs = self.tokenizer(
+                formatted_prompt,
+                return_tensors="pt",
+                add_special_tokens=True,
+            ).input_ids.to(self.device)
 
         if self.config.append_think_tag and self.config.think_tag:
             think_tokens = self.tokenizer.encode(

@@ -110,8 +110,28 @@ async def training_screen(request: Request, session_id: str = Cookie(None)):
 
     stats = app_instance.get_stats() if hasattr(app_instance, 'get_stats') else ("Step: 0", "Drift: 0.000", "Dataset: Not loaded")
     group_size = 4
+    control_response = ""
+    original_control_response = ""
+    control_prompt_text = ""
+    
     if hasattr(app_instance, "config") and app_instance.config:
         group_size = app_instance.config.group_size
+        control_prompt_text = app_instance.config.control_prompt or ""
+        
+        if app_instance.session_state and app_instance.session_state.control_history:
+            # Keys might be strings from JSON or ints from runtime, so we normalize to int
+            steps = sorted([int(k) for k in app_instance.session_state.control_history.keys()])
+            if steps:
+                # Access using original key type if needed, but since we normalized, we should probably standardize access
+                # Actually, simply converting the dict to use int keys on load or access is cleaner.
+                # For now, let's just find the max step and convert back to string if needed or rely on the fact
+                # that we can lookup by int if we stored as int, or string if stored as string.
+                # A robust way:
+                history = {int(k): v for k, v in app_instance.session_state.control_history.items()}
+                steps = sorted(history.keys())
+                
+                control_response = history[steps[-1]]
+                original_control_response = history[steps[0]]
 
     return templates.TemplateResponse("training.html", {
         "request": request,
@@ -120,6 +140,9 @@ async def training_screen(request: Request, session_id: str = Cookie(None)):
         "drift": stats[1],
         "dataset": stats[2],
         "group_size": group_size,
+        "control_response": control_response,
+        "original_control_response": original_control_response,
+        "control_prompt": control_prompt_text,
     })
 
 

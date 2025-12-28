@@ -74,6 +74,11 @@ class TRLEngine(BaseEngine):
                 bnb_4bit_compute_dtype=torch.float16,
                 bnb_4bit_use_double_quant=False,
             )
+        elif self.config.load_in_8bit:
+            print("Using 8-bit quantization (BitsAndBytes)")
+            bnb_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+            )
         else:
              if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
                  torch_dtype = torch.bfloat16
@@ -94,7 +99,7 @@ class TRLEngine(BaseEngine):
             trust_remote_code=True,
         )
 
-        if self.config.load_in_4bit:
+        if self.config.load_in_4bit or self.config.load_in_8bit:
             self.model = prepare_model_for_kbit_training(self.model)
 
         # Setup LoRA
@@ -167,20 +172,28 @@ class TRLEngine(BaseEngine):
 
     def _build_inputs(self, prompt: str) -> tuple[torch.Tensor, int, str]:
         """Construct input ids with optional think tag and return prompt length."""
-        self._ensure_chat_template()
         formatted_prompt = self._format_prompt(prompt)
 
-        messages = []
-        if self.config.system_prompt:
-            messages.append({"role": "system", "content": self.config.system_prompt})
-        messages.append({"role": "user", "content": formatted_prompt})
+        if self.config.use_chat_template:
+            self._ensure_chat_template()
+            messages = []
+            if self.config.system_prompt:
+                messages.append({"role": "system", "content": self.config.system_prompt})
+            messages.append({"role": "user", "content": formatted_prompt})
 
-        inputs = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_tensors="pt",
-        ).to(self.device)
+            inputs = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_tensors="pt",
+            ).to(self.device)
+        else:
+            # Base model mode
+            inputs = self.tokenizer(
+                formatted_prompt,
+                return_tensors="pt",
+                add_special_tokens=True,
+            ).input_ids.to(self.device)
 
         if self.config.append_think_tag and self.config.think_tag:
             think_tokens = self.tokenizer.encode(
