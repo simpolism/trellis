@@ -14,14 +14,10 @@
 <h2>Training</h2>
 <p><em>Select your preferred response to steer the model.</em></p>
 
-<button class="primary" onclick="generateOptions()" style="margin-bottom: 16px;">
-    Generate Options
-</button>
-
 <div id="prompt-container">
     <div id="prompt-display" class="prompt-card">
         <strong>Prompt:</strong><br><br>
-        <em>Click "Generate Options" to begin...</em>
+        <em>Loading...</em>
     </div>
     <textarea id="prompt-edit" style="display: none; width: 100%; min-height: 100px; margin: 8px 0;"></textarea>
     <div id="edit-buttons" style="display: none; gap: 8px; margin: 8px 0;" class="action-row">
@@ -34,7 +30,7 @@
 <hr>
 
 <div id="options-container">
-    <p><em>Options will appear here after generation...</em></p>
+    <p><em>Generating options...</em></p>
 </div>
 
 <div id="action-status" style="margin-top: 16px;"></div>
@@ -293,20 +289,17 @@ function generateOptions() {
     });
 }
 
+// Auto-advance after any HTMX action that targets #action-status
+// (select option, reject all, skip - undo uses fetch, not HTMX)
 document.body.addEventListener('htmx:afterSwap', function (evt) {
-    if (!evt.target || evt.target.id !== 'action-status') {
-        return;
-    }
-    const source = evt.detail.elt;
-    if (!source) {
-        return;
-    }
-    const shouldAdvance = source.classList.contains('option-btn')
-        || source.classList.contains('reject-btn')
-        || source.classList.contains('skip-btn');
-    if (shouldAdvance) {
+    if (evt.detail.target && evt.detail.target.id === 'action-status') {
         generateOptions();
     }
+});
+
+// Auto-generate first options on page load
+document.addEventListener('DOMContentLoaded', function() {
+    generateOptions();
 });
 </script>
 
